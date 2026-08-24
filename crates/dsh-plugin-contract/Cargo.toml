@@ -1,0 +1,12 @@
+[package]
+name = "dsh-plugin-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zero-dependency C-ABI contract between the dsh-rs host and dynamically loaded plugins."
+
+[lib]
+# Shared by the host (via dlopen) and cdylib plugins; the contract crate
+# itself is pure Rust with no cordis/tokio so plugin libraries never
+# duplicate a runtime.
+crate-type = ["lib"]

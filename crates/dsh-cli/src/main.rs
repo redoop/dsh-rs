@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use cordis::Context;
+use cordis::{Context, Plugin};
 use dsh_cli::{last_assistant_text, load_profile, parse_args};
 use dsh_core::agent::user_message_with_text;
 use dsh_core::{AgentOptions, AgentRegistry, AGENTS_SERVICE};
@@ -37,6 +37,7 @@ fn main() {
         "chat" => rt.block_on(cmd_chat(&flags, &positionals)),
         "transcript" => rt.block_on(cmd_transcript(&flags, &positionals)),
         "providers" => rt.block_on(cmd_providers(&flags)),
+        "plugin" => rt.block_on(cmd_plugin_load(&flags, &positionals)),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -64,6 +65,8 @@ fn print_help() {
          \x20 dsh chat --line [options]              force the line-based loop\n\
          \x20 dsh transcript <session-id> [options]  print a stored session transcript\n\
          \x20 dsh providers                           list registered providers\n\
+         \x20 dsh plugin load <path>                 dlopen a compiled plugin (.dylib/.so)\n\
+         \x20                                        and register its declared tools\n\
          \n\
          OPTIONS:\n\
          \x20 --provider NAME      provider route (mock | openai)\n\
@@ -172,6 +175,44 @@ async fn cmd_transcript(
     for event in &events {
         println!("{}", dsh_session::Session::render_event(event));
     }
+    Ok(())
+}
+
+async fn cmd_plugin_load(
+    flags: &std::collections::HashMap<String, String>,
+    positionals: &[String],
+) -> Result<(), String> {
+    if positionals.get(1).map(|s| s.as_str()) != Some("load") {
+        return Err("usage: dsh plugin load <path-to-plugin>".to_string());
+    }
+    let path = positionals
+        .get(2)
+        .ok_or_else(|| "plugin load requires the path to a compiled .dylib/.so plugin".to_string())?;
+    let (ctx, _handles, _config) = boot(flags).await?;
+
+    let plugin = dsh_bundle::load_dynamic_plugin(std::path::Path::new(path))
+        .map_err(|e| format!("cannot load plugin {path}: {e}"))?;
+    let plugin_name = plugin.name().to_string();
+    let declared_tools: Vec<String> = plugin.tools().iter().map(|t| t.name.clone()).collect();
+
+    let config = flags
+        .get("config")
+        .and_then(|c| serde_json::from_str(c).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let fiber = ctx.plugin(plugin, Some(config));
+    fiber
+        .join()
+        .await
+        .map_err(|e| format!("plugin {plugin_name} failed to activate: {e}"))?;
+    println!("loaded plugin: {plugin_name} (state: {:?})", fiber.state());
+    if !declared_tools.is_empty() {
+        println!("declared tools: {}", declared_tools.join(", "));
+    }
+    let tools = ctx
+        .get::<dsh_tools::ToolRegistry>("tools")
+        .map(|registry| registry.list())
+        .unwrap_or_default();
+    println!("tools now registered: {}", tools.join(", "));
     Ok(())
 }
 

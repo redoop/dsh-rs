@@ -6,6 +6,8 @@
 //! kernel. A profile is just a named composition; the base bundle is the one
 //! every profile stacks first.
 
+pub mod dynamic;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -119,6 +121,11 @@ pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<Fiber
             .map_err(|err| format!("bundle plugin {} failed to start: {err}", handle.name()))?;
     }
     Ok(handles)
+}
+
+/// Convenience: load a dynamic plugin cdylib (see [`dynamic`]).
+pub fn load_dynamic_plugin(path: &std::path::Path) -> dynamic::Result<Arc<dynamic::DynamicPlugin>> {
+    dynamic::load_dynamic_plugin(path)
 }
 
 /// Convenience: install the base bundle with an in-memory store.

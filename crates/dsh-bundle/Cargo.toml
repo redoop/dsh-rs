@@ -12,7 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 futures.workspace = true
+libloading = "0.8"
 dsh-llm = { path = "../dsh-llm" }
 dsh-session = { path = "../dsh-session" }
 dsh-tools = { path = "../dsh-tools" }
 dsh-core = { path = "../dsh-core" }
+dsh-plugin-contract = { path = "../dsh-plugin-contract" }

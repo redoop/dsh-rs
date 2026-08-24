@@ -1,0 +1,15 @@
+[package]
+name = "dsh-plugin-hello"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Example dynamically loaded plugin: registers a dsh_hello tool."
+
+[lib]
+# A plugin is an independent cdylib — compiled on its own, loaded at runtime
+# by `dsh plugin load`. It depends ONLY on the zero-dep contract crate.
+crate-type = ["cdylib"]
+
+[dependencies]
+dsh-plugin-contract = { path = "../dsh-plugin-contract" }
+serde_json = "1"

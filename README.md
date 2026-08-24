@@ -175,6 +175,37 @@ cargo test -p dsh-cli --test chat_flow   # 7 tests, no terminal required
 cargo test --workspace                   # 53 tests, all green
 ```
 
+## Dynamic plugins (independent compilation + runtime loading)
+
+A plugin can be **compiled independently as a cdylib** and **loaded at runtime**
+— the host dlopens it and adapts it to the cordis `Plugin` trait. The plugin
+speaks only a zero-dependency C-ABI contract (`dsh-plugin-contract`) and
+**never links cordis or tokio**: the host implements the framework, the plugin
+only computes (the same design as cordis-rs's `dynhost`).
+
+```sh
+# 1. compile the example plugin as a standalone library
+cargo build -p dsh-plugin-hello
+
+# 2. load it into a running harness; it declares its tools and registers them
+./target/debug/dsh plugin load ./target/debug/libdsh_plugin_hello.dylib
+#   loaded plugin: dsh-plugin-hello (state: Active)
+#   declared tools: dsh_hello
+#   tools now registered: bash, dsh_hello, edit_file, ...
+
+# 3. the agent loop can now call dsh_hello like any built-in tool
+./target/debug/dsh run --prompt "use dsh_hello" --provider mock
+```
+
+A plugin's JSON declaration (`describe`) lists the services it needs
+(`inject`) and the tools it provides; each tool's `execute` calls back into
+the library via `invoke`. Loading, registration, and unload are all cordis
+fiber effects — unloading the plugin unregisters its tools automatically.
+A plugin with `inject: ["tools"]` converges only after that service is live,
+exactly like the static plugins. Add your own plugin: implement
+`DshPluginExports` (see `crates/dsh-plugin-hello`) and export it as
+`dsh_plugin_exports`.
+
 ## Extending
 
 Add a tool: build a `ToolDefinition` and register it on `ctx.tools`. Add a

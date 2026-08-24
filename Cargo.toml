@@ -7,6 +7,8 @@ members = [
     "crates/dsh-core",
     "crates/dsh-bundle",
     "crates/dsh-cli",
+    "crates/dsh-plugin-contract",
+    "crates/dsh-plugin-hello",
 ]
 
 [workspace.package]
