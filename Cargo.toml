@@ -1,26 +1,25 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/dsh-types",
-    "crates/dsh-api",
-    "crates/dsh-llm",
-    "crates/dsh-session",
-    "crates/dsh-tools",
-    "crates/dsh-core",
-    "crates/dsh-bundle",
-    "crates/dsh-cli",
-    "crates/dsh-plugin-contract",
-    "crates/dsh-plugin-hello",
-]
-
-[workspace.package]
-version = "0.1.0"
+[package]
+name = "dsh-rs"
+description = "The dsh agent harness, collapsed into one crate: plugins, typed events, manifest validation, multi-provider LLM seam, and the dsh CLI."
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/redoop/dsh-rs"
+keywords = ["agent", "llm", "plugin", "cli", "harness"]
+categories = ["command-line-utilities", "development-tools"]
 
-[workspace.dependencies]
-# The kernel: a Rust port of the cordis plugin framework (crates.io release).
+[lib]
+name = "dsh_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dsh"
+path = "src/main.rs"
+
+[dependencies]
+# The kernel (published on crates.io as cordis-rust; lib name stays cordis).
 cordis = { version = "0.2", package = "cordis-rust" }
+dsh-plugin-contract = { version = "0.2", package = "dsh-plugin-contract" }
 
 tokio = { version = "1.50", features = [
     "rt-multi-thread",
@@ -35,6 +34,29 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 futures = "0.3"
+
+# OpenAI-compatible LLM adapter (the `openai` feature, enabled by default).
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"], optional = true }
+futures-util = { version = "0.3", optional = true }
+bytes = { version = "1", optional = true }
+
+# Tools (bash/glob/grep) and dynamic-plugin loading.
+regex = "1"
+libloading = "0.8"
+
+# Terminal chat UI (dsh chat).
+ratatui = "0.29"
+unicode-width = "0.2"
+unicode-segmentation = "1"
+
+[features]
+default = ["openai"]
+openai = ["dep:reqwest", "dep:futures-util", "dep:bytes"]
+
+# Local development: resolve workspace-internal deps from the working tree
+# even before they are published. `cargo publish` ignores [patch].
+[patch.crates-io]
+dsh-plugin-contract = { path = "crates/dsh-plugin-contract" }
 
 [profile.dev]
 opt-level = 1

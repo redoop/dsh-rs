@@ -1,8 +1,11 @@
 [package]
 name = "dsh-plugin-contract"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/redoop/dsh-rs"
+keywords = ["plugin", "cdylib", "ffi", "abi", "contract"]
+categories = ["development-tools", "ffi"]
 description = "Zero-dependency C-ABI contract between the dsh-rs host and dynamically loaded plugins."
 
 [lib]

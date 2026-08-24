@@ -201,140 +201,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "dsh-api"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "dsh-types",
- "futures",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
+name = "dsh-plugin-contract"
+version = "0.2.0"
 
 [[package]]
-name = "dsh-bundle"
-version = "0.1.0"
+name = "dsh-rs"
+version = "0.2.0"
 dependencies = [
+ "bytes",
  "cordis-rust",
- "dsh-api",
- "dsh-core",
- "dsh-llm",
  "dsh-plugin-contract",
- "dsh-session",
- "dsh-tools",
- "dsh-types",
  "futures",
+ "futures-util",
  "libloading",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dsh-cli"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "dsh-api",
- "dsh-bundle",
- "dsh-types",
  "ratatui",
+ "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "unicode-segmentation",
  "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "dsh-core"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "dsh-api",
- "dsh-llm",
- "dsh-session",
- "dsh-tools",
- "dsh-types",
- "futures",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dsh-llm"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "cordis-rust",
- "dsh-api",
- "dsh-types",
- "futures",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dsh-plugin-contract"
-version = "0.1.0"
-
-[[package]]
-name = "dsh-plugin-hello"
-version = "0.1.0"
-dependencies = [
- "dsh-plugin-contract",
- "serde_json",
-]
-
-[[package]]
-name = "dsh-session"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "dsh-api",
- "dsh-llm",
- "dsh-types",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dsh-tools"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "dsh-api",
- "dsh-llm",
- "dsh-types",
- "regex",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "dsh-types"
-version = "0.1.0"
-dependencies = [
- "cordis-rust",
- "futures",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
