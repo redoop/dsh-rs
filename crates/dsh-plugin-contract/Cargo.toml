@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/redoop/dsh-rs"
 keywords = ["plugin", "cdylib", "ffi", "abi", "contract"]
-categories = ["development-tools", "ffi"]
+categories = ["development-tools"]
 description = "Zero-dependency C-ABI contract between the dsh-rs host and dynamically loaded plugins."
 
 [lib]
