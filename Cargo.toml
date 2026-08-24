@@ -20,7 +20,7 @@ license = "MIT"
 
 [workspace.dependencies]
 # The kernel: a Rust port of the cordis plugin framework.
-cordis = { path = "../cordis-rs/crates/cordis" }
+cordis = { package = "cordis-rust", path = "../cordis-rs/crates/cordis" }
 
 tokio = { version = "1.50", features = [
     "rt-multi-thread",
