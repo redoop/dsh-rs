@@ -115,9 +115,7 @@ async fn bundle_with_persistence_records_sessions() {
         &ctx,
         BaseConfig {
             store_dir: Some(dir.clone()),
-            openai: None,
-            default_provider: None,
-            default_model: None,
+            ..Default::default()
         },
     )
     .await

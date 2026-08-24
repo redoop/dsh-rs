@@ -317,17 +317,6 @@ impl SseParser {
 
 /// Convert one OpenAI SSE event object into a stream chunk.
 fn parse_event(event: &Value) -> StreamChunk {
-    if let Some(usage) = event.get("usage") {
-        return StreamChunk::Usage {
-            usage: TokenUsage {
-                input_tokens: usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                output_tokens: usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                reasoning_tokens: None,
-            },
-        };
-    }
     let choice = &event["choices"][0];
     let delta = &choice["delta"];
     // Each block KIND gets its own assembler index: text = 0, reasoning = 1,
@@ -385,6 +374,20 @@ fn parse_event(event: &Value) -> StreamChunk {
             _ => FinishReason::Stop,
         };
         return StreamChunk::Finish { reason };
+    }
+    // `usage` is handled LAST: some OpenAI-compatible gateways (e.g. OpenCode
+    // Zen) attach a usage snapshot to EVERY delta-bearing chunk, so checking
+    // it first would swallow the actual content deltas.
+    if let Some(usage) = event.get("usage") {
+        return StreamChunk::Usage {
+            usage: TokenUsage {
+                input_tokens: usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                output_tokens: usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
+            },
+        };
     }
     // Nothing actionable in this event; synthesize an empty text delta so the
     // stream stays live (consumers tolerate empty deltas).

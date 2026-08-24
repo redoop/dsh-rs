@@ -28,6 +28,10 @@ pub struct BaseConfig {
     pub store_dir: Option<PathBuf>,
     /// OpenAI-compatible provider section (see `dsh_llm`'s openai adapter).
     pub openai: Option<Value>,
+    /// Additional OpenAI-compatible endpoints, one adapter per segment:
+    /// `{ "opencode": { "base_url", "api_key", "model" }, ... }`. Merged
+    /// into the `llm` plugin's `adapters` map alongside `openai`.
+    pub adapters: Option<Value>,
     /// Default provider route for agents (falls back to `mock`).
     pub default_provider: Option<String>,
     /// Default model id for agents (falls back per provider).
@@ -43,7 +47,8 @@ impl BaseConfig {
     ///   "store_dir": "/tmp/dsh-sessions",
     ///   "provider": "deepseek",
     ///   "model": "deepseek-chat",
-    ///   "openai": { "providers": [...], "base_url": "...", "api_key": "..." }
+    ///   "openai": { "providers": [...], "base_url": "...", "api_key": "..." },
+    ///   "adapters": { "opencode": { "base_url": "...", "api_key": "..." } }
     /// }
     /// ```
     pub fn from_value(value: &Value) -> BaseConfig {
@@ -53,6 +58,9 @@ impl BaseConfig {
         }
         if let Some(openai) = value.get("openai") {
             config.openai = Some(openai.clone());
+        }
+        if let Some(adapters) = value.get("adapters") {
+            config.adapters = Some(adapters.clone());
         }
         if let Some(provider) = value.get("provider").and_then(|p| p.as_str()) {
             config.default_provider = Some(provider.to_string());
@@ -162,11 +170,17 @@ pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<Fiber
         config: None,
     });
 
-    // 1. LLM seam: the mock adapter is always registered; openai optional.
+    // 1. LLM seam: the mock adapter is always registered; every
+    // OpenAI-compatible endpoint from `adapters` (plus the legacy `openai`
+    // section) is mounted as its own adapter.
     let mut llm_config = json!({});
+    let mut adapters = config.adapters.clone().unwrap_or_else(|| json!({}));
     if let Some(openai) = &config.openai {
-        llm_config["adapters"]["openai"] = openai.clone();
+        if let Some(map) = adapters.as_object_mut() {
+            map.insert("openai".to_string(), openai.clone());
+        }
     }
+    llm_config["adapters"] = adapters;
     entries.push(BundleEntry {
         name: "llm",
         plugin: dsh_llm::llm_plugin(),

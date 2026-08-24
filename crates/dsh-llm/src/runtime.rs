@@ -180,28 +180,36 @@ pub fn llm_plugin() -> Arc<dyn Plugin> {
         ctx.provide(dsh_api::LLM_SERVICE, dsh_api::services::LlmService::new(api)).await?;
         ctx.provide(dsh_api::LLM_STREAMS_SERVICE, streams.clone()).await?;
 
-        // Adapters from config: { "mock": { "providers": [...] }, "openai": { ... } }
+        // Adapters from config: every entry of { "adapters": { ... } } is an
+        // OpenAI-compatible endpoint whose segment name is the default
+        // provider route (overridable via the entry's "providers" list).
         let adapters = config.get("adapters").cloned().unwrap_or(Value::Null);
 
         // Mock adapter is always available under "mock".
         let mock = Arc::new(crate::adapters::mock::MockAdapter::new());
         runtime.register_adapter(&["mock"], mock as Arc<dyn LlmAdapter>)?;
 
-        // OpenAI-compatible adapter, configured via the "openai" section.
+        // OpenAI-compatible adapters, configured via the "adapters" section:
+        // { "openai": {...}, "opencode": { "base_url", "api_key", "model" } }.
         #[cfg(feature = "openai")]
         {
             use crate::adapters::openai::OpenAiAdapter;
-            if let Some(section) = adapters.get("openai") {
-                let providers: Vec<String> = section
-                    .get("providers")
-                    .and_then(|p| serde_json::from_value(p.clone()).ok())
-                    .unwrap_or_else(|| vec!["openai".to_string()]);
-                let adapter = Arc::new(
-                    OpenAiAdapter::new(section.clone())
-                        .map_err(|err| cordis::Error::msg(err.to_string()))?,
-                );
-                let refs: Vec<&str> = providers.iter().map(|s| s.as_str()).collect();
-                runtime.register_adapter(&refs, adapter as Arc<dyn LlmAdapter>)?;
+            if let Some(map) = adapters.as_object() {
+                for (name, section) in map {
+                    if !section.is_object() {
+                        continue;
+                    }
+                    let providers: Vec<String> = section
+                        .get("providers")
+                        .and_then(|p| serde_json::from_value(p.clone()).ok())
+                        .unwrap_or_else(|| vec![name.clone()]);
+                    let adapter = Arc::new(
+                        OpenAiAdapter::new(section.clone())
+                            .map_err(|err| cordis::Error::msg(err.to_string()))?,
+                    );
+                    let refs: Vec<&str> = providers.iter().map(|s| s.as_str()).collect();
+                    runtime.register_adapter(&refs, adapter as Arc<dyn LlmAdapter>)?;
+                }
             }
         }
         #[cfg(not(feature = "openai"))]
