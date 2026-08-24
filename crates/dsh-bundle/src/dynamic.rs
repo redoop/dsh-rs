@@ -359,9 +359,11 @@ impl Plugin for DynamicPlugin {
             })
             .await?;
 
-            ctx.logger().log(
+            ctx.logger().log_event(
                 cordis::logger::LogLevel::Info,
-                format!("[dynamic] {name} active ({tools_count} tool(s))"),
+                "dynamic-plugin".to_string(),
+                None,
+                format!("{name} active ({tools_count} tool(s))"),
             );
             Ok(())
         })
