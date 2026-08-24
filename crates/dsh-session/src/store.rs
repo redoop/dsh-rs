@@ -158,7 +158,8 @@ impl SessionStore {
     }
 
     /// The durability checkpoint: flush every backend for one session, then
-    /// dispatch the awaited `session/flush` parallel event.
+    /// dispatch the awaited `session/flush` parallel event (bounded: a hung
+    /// flush listener cannot wedge the checkpoint forever).
     pub async fn flush(&self, session: &Arc<Session>) -> Result<(), crate::SessionError> {
         let backends = self.inner.backends.lock().unwrap().clone();
         for backend in &backends {
@@ -168,7 +169,7 @@ impl SessionStore {
         let result = self
             .inner
             .ctx
-            .parallel("session/flush", payload)
+            .parallel_timeout("session/flush", payload, std::time::Duration::from_secs(10))
             .await;
         match result {
             Ok(_) => Ok(()),

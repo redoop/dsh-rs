@@ -105,6 +105,15 @@ pub fn emit<E: EventPayload>(ctx: &Context, payload: &E) {
     }
 }
 
+/// Emit a typed event through the **sync slot**: listeners registered with
+/// [`on_sync`] are awaited inline (zero spawns) — the hot path for
+/// high-frequency events emitted from an async context.
+pub async fn emit_sync<E: EventPayload>(ctx: &Context, payload: &E) -> Result<(), cordis::Error> {
+    let value =
+        serde_json::to_value(payload).map_err(|e| cordis::Error::msg(e.to_string()))?;
+    ctx.emit_sync(E::NAME, value).await
+}
+
 /// Register a typed listener. `handler` receives the parsed payload; errors
 /// are reported (and contained) by the bus like any listener failure.
 pub async fn on<E, F>(ctx: &Context, handler: F) -> Result<cordis::fiber::EffectGuard, cordis::Error>
@@ -112,7 +121,29 @@ where
     E: EventPayload,
     F: Fn(Context, E) -> BoxFuture<cordis::Result<Value>> + Send + Sync + 'static,
 {
-    ctx.on(E::NAME, move |ctx, payload, _next| {
+    ctx.on(E::NAME, typed_listener::<E, F>(handler)).await
+}
+
+/// Register a **sync-slot** typed listener (see [`on`] and [`emit_sync`]).
+pub async fn on_sync<E, F>(
+    ctx: &Context,
+    handler: F,
+) -> Result<cordis::fiber::EffectGuard, cordis::Error>
+where
+    E: EventPayload,
+    F: Fn(Context, E) -> BoxFuture<cordis::Result<Value>> + Send + Sync + 'static,
+{
+    ctx.on_sync(E::NAME, typed_listener::<E, F>(handler)).await
+}
+
+fn typed_listener<E, F>(
+    handler: F,
+) -> impl Fn(Context, Value, cordis::Next) -> BoxFuture<cordis::Result<Value>> + Send + Sync + 'static
+where
+    E: EventPayload,
+    F: Fn(Context, E) -> BoxFuture<cordis::Result<Value>> + Send + Sync + 'static,
+{
+    move |ctx, payload, _next| {
         let parsed = match serde_json::from_value::<E>(payload) {
             Ok(parsed) => parsed,
             Err(err) => {
@@ -125,8 +156,7 @@ where
             }
         };
         handler(ctx, parsed)
-    })
-    .await
+    }
 }
 
 /// Serialize a typed payload to the bus value (for waterfall payloads that
