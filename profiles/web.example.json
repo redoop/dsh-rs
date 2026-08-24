@@ -1,0 +1,12 @@
+{
+  "bundles": ["base"],
+  "config": {
+    "store_dir": "/tmp/dsh-sessions",
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-...",
+      "model": "gpt-4o-mini",
+      "providers": ["openai"]
+    }
+  }
+}

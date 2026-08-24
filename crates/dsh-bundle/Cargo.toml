@@ -1,0 +1,18 @@
+[package]
+name = "dsh-bundle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Composition of the dsh-rs base bundle."
+
+[dependencies]
+cordis.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+dsh-llm = { path = "../dsh-llm" }
+dsh-session = { path = "../dsh-session" }
+dsh-tools = { path = "../dsh-tools" }
+dsh-core = { path = "../dsh-core" }

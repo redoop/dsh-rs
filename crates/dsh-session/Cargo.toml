@@ -1,0 +1,14 @@
+[package]
+name = "dsh-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Event-sourced session log, SessionStore, and JSONL persistence for dsh-rs."
+
+[dependencies]
+cordis.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+dsh-llm = { path = "../dsh-llm" }

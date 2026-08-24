@@ -1,0 +1,28 @@
+[package]
+name = "dsh-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Headless dsh-rs runner."
+
+[[bin]]
+name = "dsh"
+path = "src/main.rs"
+
+[dependencies]
+cordis.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+dsh-llm = { path = "../dsh-llm" }
+dsh-session = { path = "../dsh-session" }
+dsh-tools = { path = "../dsh-tools" }
+dsh-core = { path = "../dsh-core" }
+dsh-bundle = { path = "../dsh-bundle" }
+
+# Terminal chat UI
+ratatui = "0.29"
+unicode-width = "0.2"
+# Grapheme-aware text editing (IME composition, emoji, combining marks)
+unicode-segmentation = "1"

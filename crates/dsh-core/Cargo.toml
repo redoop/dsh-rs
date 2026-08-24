@@ -1,0 +1,17 @@
+[package]
+name = "dsh-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "System-prompt assembly, agent registry, and the agent loop for dsh-rs."
+
+[dependencies]
+cordis.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+dsh-llm = { path = "../dsh-llm" }
+dsh-session = { path = "../dsh-session" }
+dsh-tools = { path = "../dsh-tools" }

@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dsh-llm",
+    "crates/dsh-session",
+    "crates/dsh-tools",
+    "crates/dsh-core",
+    "crates/dsh-bundle",
+    "crates/dsh-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# The kernel: a Rust port of the cordis plugin framework.
+cordis = { path = "../cordis-rs/crates/cordis" }
+
+tokio = { version = "1.50", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "process",
+    "io-util",
+    "fs",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+futures = "0.3"
+
+[profile.dev]
+opt-level = 1

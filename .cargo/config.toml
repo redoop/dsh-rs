@@ -1,0 +1,5 @@
+# Cargo home lives inside the workspace so builds work in restricted
+# environments where ~/.cargo is read-only. Invoke cargo with
+# `CARGO_HOME=$PWD/.cargo-home` (or `source ./env.sh`).
+[net]
+offline = false

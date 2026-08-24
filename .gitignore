@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+.DS_Store
+# Local credentials / runtime config (never commit API keys)
+/dsh.json
+
+# Local cargo cache / build environment
+/.cargo-home
+/pi
+/pi.c
