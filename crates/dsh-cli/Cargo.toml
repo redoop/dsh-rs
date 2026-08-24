@@ -16,10 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 dsh-api = { path = "../dsh-api" }
-dsh-llm = { path = "../dsh-llm" }
-dsh-session = { path = "../dsh-session" }
-dsh-tools = { path = "../dsh-tools" }
-dsh-core = { path = "../dsh-core" }
+dsh-types = { path = "../dsh-types" }
 dsh-bundle = { path = "../dsh-bundle" }
 
 # Terminal chat UI

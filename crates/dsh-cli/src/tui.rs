@@ -23,8 +23,7 @@ use ratatui::{Frame, Terminal};
 use unicode_width::UnicodeWidthStr;
 
 use dsh_api::services::AgentView;
-use dsh_llm::ContentBlock;
-use dsh_session::{SessionEvent, SessionEventData};
+use dsh_types::{ContentBlock, SessionEvent, SessionEventData, TurnEndReason};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Hard cap on pasted text, so a huge paste cannot freeze the UI.
@@ -50,7 +49,7 @@ pub struct ChatState {
 }
 
 /// Extract the text nested inside a tool-result content block.
-fn tool_result_text(message: &dsh_llm::Message) -> String {
+fn tool_result_text(message: &dsh_types::Message) -> String {
     let mut out = String::new();
     for block in &message.content {
         if let ContentBlock::ToolResult { content, .. } = block {
@@ -64,7 +63,7 @@ fn tool_result_text(message: &dsh_llm::Message) -> String {
     out
 }
 
-fn message_is_error(message: &dsh_llm::Message) -> bool {
+fn message_is_error(message: &dsh_types::Message) -> bool {
     message.content.iter().any(|block| {
         matches!(
             block,
@@ -90,7 +89,7 @@ impl ChatState {
                 true
             }
             SessionEventData::AssistantChunk { chunk, .. } => {
-                if let dsh_llm::StreamChunk::TextDelta { text, .. } = chunk {
+                if let dsh_types::StreamChunk::TextDelta { text, .. } = chunk {
                     self.pending.push_str(text);
                 }
                 true
@@ -122,7 +121,6 @@ impl ChatState {
                 true
             }
             SessionEventData::TurnEnd { reason, .. } => {
-                use dsh_session::TurnEndReason;
                 if !matches!(reason, TurnEndReason::Completed) {
                     self.flush_pending();
                     self.items.push(ChatItem::System {
@@ -583,10 +581,7 @@ impl ChatTui {
                 }
                 self.history.push(text.clone());
                 self.seq += 1;
-                agent.followup(dsh_core::agent::user_message_with_text(
-                    format!("u-{}", self.seq),
-                    text,
-                ));
+                agent.followup(crate::user_message_with_text(format!("u-{}", self.seq), text));
                 Ok(false)
             }
             KeyCode::Backspace => {

@@ -256,7 +256,7 @@ cdylib 通过 `dsh_plugin_contract::DshPluginExports`（describe/invoke），宿
 | 契约可见性 | 无 | `PluginManifest` + `dsh dump-config` + 依赖校验 |
 | todo 工具位置 | dsh-core（agent-loop 注册） | dsh-tools 内置 |
 | 动态插件注册 | 直接构造 `ToolDefinition` | `DynamicToolSpec` 走接口 |
-| 测试规模 | 69 | 69（同类，已按接口改写） |
+| 测试规模 | 69 | 70（69 同类按接口改写 + 新增 manifest 覆盖校验测试） |
 
 ---
 
@@ -271,6 +271,9 @@ cdylib 通过 `dsh_plugin_contract::DshPluginExports`（describe/invoke），宿
    `dsh-plugin-contract::ABI_VERSION` 做启动时契约校验。
 4. **生成式清单**：可考虑 build-time 生成 manifests（如从插件源码注解），
    避免手写清单与实际 `inject`/`provides` 漂移——运行时校验是对冲手段。
-5. **验证状态**：本分支在回滚前已通过全量 `cargo build --workspace`；
-   分 crate 测试（69 个）在重构后曾全绿；受当时执行环境故障影响，
-   **最终 `cargo test --workspace` 与 `dsh dump-config` 的现场验证待补**。
+5. **验证状态**：本分支已通过全量 `cargo build --workspace --all-targets`（零警告），
+   69 个测试与全部二进制/示例均编译通过（`cargo test --no-run` 全绿）。
+   受执行环境故障影响（宿主沙箱挂起一切非白名单二进制的直接执行，曾用
+   权限升级/路径迁移/签名/解释器 execv 尝试均无效），**最终
+   `cargo test --workspace` 与 `dsh dump-config` 的现场运行验证仍需在
+   可执行环境补跑**。

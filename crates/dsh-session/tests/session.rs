@@ -225,8 +225,10 @@ async fn jsonl_plugin_attaches_to_store() {
     });
     store.flush(session.id()).await.unwrap();
 
-    let handle = ctx.require::<dsh_session::persistence::PersistenceService>("sessionPersistence").unwrap();
-    let loaded = handle.backend.load(&"plugged-persist".to_string()).unwrap();
+    let handle = ctx
+        .get::<Arc<dyn dsh_api::services::SessionPersistenceApi>>("sessionPersistence")
+        .expect("persistence service must be available through the interface");
+    let loaded = handle.load(&"plugged-persist".to_string()).unwrap();
     assert_eq!(loaded.len(), 1);
     assert!(dir.join("plugged-persist.jsonl").exists());
     std::fs::remove_dir_all(&dir).ok();

@@ -123,7 +123,10 @@ impl SystemPromptService {
             sections.push(section);
         }
         drop(sections);
-        self.inner.ctx.emit("system-prompt/change", Value::Null);
+        dsh_api::events::emit(
+            &self.inner.ctx,
+            &dsh_api::events::SystemPromptChangePayload,
+        );
     }
 
     /// Register ordered dynamic context.
@@ -135,7 +138,10 @@ impl SystemPromptService {
             contexts.push(context);
         }
         drop(contexts);
-        self.inner.ctx.emit("system-prompt/change", Value::Null);
+        dsh_api::events::emit(
+            &self.inner.ctx,
+            &dsh_api::events::SystemPromptChangePayload,
+        );
     }
 
     /// Register a prompt variable. The provider may return `None`, in which

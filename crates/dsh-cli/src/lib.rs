@@ -1,8 +1,27 @@
 //! Shared helpers for the dsh-rs headless runner.
+//!
+//! This crate is a pure **consumer** of the interface layer: it depends only
+//! on `dsh-api` (service wrappers), `dsh-types` (shared vocabulary), and
+//! `dsh-bundle` (base-bundle composition). It never imports implementation
+//! crate types.
 
 pub mod tui;
 
+use dsh_types::{
+    ContentBlock, Message, MessageSource, Role, SessionEvent, SessionEventData, TurnEndReason,
+    now_ms,
+};
 use serde_json::Value;
+
+/// Build a user-role message for the model (consumer-side helper).
+pub fn user_message_with_text(id: impl Into<String>, text: impl Into<String>) -> Message {
+    Message {
+        id: id.into(),
+        role: Role::User,
+        content: vec![ContentBlock::text(text)],
+        source: MessageSource::User,
+    }
+}
 
 /// Render the final assistant text of a session (the last assistant message).
 pub fn last_assistant_text(session: &dyn dsh_api::services::SessionView) -> String {
@@ -10,14 +29,58 @@ pub fn last_assistant_text(session: &dyn dsh_api::services::SessionView) -> Stri
     messages
         .iter()
         .rev()
-        .find(|m| m.role == dsh_llm::Role::Assistant)
+        .find(|m| m.role == Role::Assistant)
         .map(|m| m.text())
         .unwrap_or_default()
 }
 
-/// Render a compact transcript of the session log.
-pub fn transcript(session: &dsh_session::Session) -> String {
-    session.render()
+/// One-line textual rendering of a session event (transcript display).
+pub fn render_event(event: &SessionEvent) -> String {
+    match &event.data {
+        SessionEventData::UserMessage { message } => format!("[user] {}", message.text()),
+        SessionEventData::AssistantMessage { message, .. } => {
+            format!("[assistant] {}", message.text())
+        }
+        SessionEventData::ToolCall { name, arguments, .. } => {
+            let parsed: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+            format!("[tool-call] {name} {parsed}")
+        }
+        SessionEventData::ToolResult { message, .. } => {
+            format!("[tool-result] {}", message.text())
+        }
+        SessionEventData::TurnStart { .. } => "[turn/start]".to_string(),
+        SessionEventData::TurnEnd { reason, .. } => format!("[turn/end] {reason:?}"),
+        SessionEventData::StepStart { .. } => "[step/start]".to_string(),
+        SessionEventData::StepEnd { .. } => "[step/end]".to_string(),
+        SessionEventData::AssistantChunk { chunk, .. } => format!("[assistant/chunk] {chunk:?}"),
+        SessionEventData::TodoWrite { todos } => format!("[todo/write] {todos:?}"),
+        SessionEventData::RequestHeader { .. } => "[request/header]".to_string(),
+        SessionEventData::SessionEndSeed => "[session/end-seed]".to_string(),
+    }
+}
+
+/// Close a crash-orphaned trailing turn with `turn/end { interrupted }`.
+/// Returns whether a repair was made (idempotent). Mirrors the persistence
+/// crate's reload repair, expressed over the shared vocabulary only.
+pub fn repair_crash_turns(events: &mut Vec<SessionEvent>) -> bool {
+    let mut open: Option<u64> = None;
+    for event in events.iter() {
+        match &event.data {
+            SessionEventData::TurnStart { turn } => open = Some(*turn),
+            SessionEventData::TurnEnd { .. } => open = None,
+            _ => {}
+        }
+    }
+    let Some(turn) = open else { return false };
+    events.push(SessionEvent::new(
+        events.len() as u64,
+        now_ms(),
+        SessionEventData::TurnEnd {
+            turn,
+            reason: TurnEndReason::Interrupted,
+        },
+    ));
+    true
 }
 
 /// Parse `--key value` style arguments. Returns (flags, positionals).

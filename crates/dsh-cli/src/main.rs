@@ -12,10 +12,9 @@
 use std::sync::Arc;
 
 use cordis::{Context, Plugin};
-use dsh_cli::{last_assistant_text, load_profile, parse_args};
-use dsh_core::agent::user_message_with_text;
-use dsh_api::services::{AgentRegistryService, AgentView};
-use dsh_core::AgentOptions;
+use dsh_api::services::{AgentRegistryService, AgentView, LlmService};
+use dsh_cli::{last_assistant_text, load_profile, parse_args, render_event, repair_crash_turns};
+use dsh_types::AgentOptions;
 use serde_json::Value;
 
 fn main() {
@@ -102,7 +101,7 @@ async fn cmd_run(
     let (ctx, _handles, config) = boot(flags).await?;
     let agent = create_agent(&ctx, flags, &config).await?;
 
-    agent.followup(user_message_with_text("u-1", prompt));
+    agent.followup(dsh_cli::user_message_with_text("u-1", prompt));
     agent.when_idle().await;
     flush_session(&ctx, &agent).await;
 
@@ -149,7 +148,7 @@ async fn line_chat(ctx: &Context, agent: &Arc<dyn AgentView>) -> Result<(), Stri
             continue;
         }
         seq += 1;
-        agent.followup(user_message_with_text(format!("u-{seq}"), line));
+        agent.followup(dsh_cli::user_message_with_text(format!("u-{seq}"), line));
         agent.when_idle().await;
         flush_session(ctx, agent).await;
         println!("{}", last_assistant_text(agent.session().as_ref()));
@@ -157,6 +156,9 @@ async fn line_chat(ctx: &Context, agent: &Arc<dyn AgentView>) -> Result<(), Stri
     Ok(())
 }
 
+/// Load a stored session transcript. The JSONL backend is reached **through
+/// the interface** (`ctx.sessionPersistence` as `Arc<dyn SessionPersistenceApi>`),
+/// never through the concrete implementation crate.
 async fn cmd_transcript(
     flags: &std::collections::HashMap<String, String>,
     positionals: &[String],
@@ -167,15 +169,31 @@ async fn cmd_transcript(
         .ok_or_else(|| "transcript requires a session id".to_string())?;
     let store_dir = flag(flags, "store")
         .ok_or_else(|| "transcript requires --store DIR".to_string())?;
-    let backend = Arc::new(dsh_session::JsonlPersistence::new(store_dir));
-    let events = dsh_session::load_with_repair(backend.as_ref(), &session_id)
+
+    // Boot the base bundle with the persistence backend attached.
+    let ctx = Context::new();
+    let config = dsh_bundle::BaseConfig {
+        store_dir: Some(std::path::PathBuf::from(&store_dir)),
+        ..Default::default()
+    };
+    dsh_bundle::install_base(&ctx, config).await?;
+
+    let backend = ctx
+        .get::<Arc<dyn dsh_api::services::SessionPersistenceApi>>(
+            dsh_api::SESSION_PERSISTENCE_SERVICE,
+        )
+        .ok_or_else(|| "persistence service missing — was a store dir configured?".to_string())?;
+
+    let mut events = backend
+        .load(&session_id)
         .map_err(|e| format!("cannot load {session_id}: {e}"))?;
+    repair_crash_turns(&mut events);
     if events.is_empty() {
         println!("(no events for session {session_id})");
         return Ok(());
     }
     for event in &events {
-        println!("{}", dsh_session::Session::render_event(event));
+        println!("{}", render_event(event));
     }
     Ok(())
 }
@@ -239,7 +257,7 @@ async fn cmd_plugin_load(
         println!("declared tools: {}", declared_tools.join(", "));
     }
     let tools = ctx
-        .get::<dsh_api::services::ToolsService>("tools")
+        .get::<dsh_api::services::ToolsService>(dsh_api::TOOLS_SERVICE)
         .map(|registry| registry.list())
         .unwrap_or_default();
     println!("tools now registered: {}", tools.join(", "));
@@ -249,7 +267,7 @@ async fn cmd_plugin_load(
 async fn cmd_providers(flags: &std::collections::HashMap<String, String>) -> Result<(), String> {
     let (ctx, _handles, _config) = boot(flags).await?;
     let runtime = ctx
-        .require::<dsh_api::services::LlmService>("llm")
+        .require::<dsh_api::services::LlmService>(dsh_api::LLM_SERVICE)
         .map_err(|e| e.to_string())?;
     for provider in runtime.list_providers() {
         println!("{}\t({})", provider.id, provider.name);
@@ -335,7 +353,9 @@ async fn create_agent(
     flags: &std::collections::HashMap<String, String>,
     config: &dsh_bundle::BaseConfig,
 ) -> Result<Arc<dyn AgentView>, String> {
-    let runtime = ctx.get::<dsh_llm::LlmRuntime>("llm");
+    // Provider detection goes through the llm SERVICE wrapper, never the
+    // concrete runtime type.
+    let runtime = ctx.get::<LlmService>(dsh_api::LLM_SERVICE);
     let has_deepseek = runtime.is_some_and(|r| r.has_provider("deepseek"));
 
     let provider = flag(flags, "provider")

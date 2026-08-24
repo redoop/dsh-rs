@@ -149,14 +149,10 @@ pub fn load_with_repair(
     Ok(events)
 }
 
-/// Service handle for the attached persistence backend (`ctx.sessionPersistence`).
-#[derive(Clone)]
-pub struct PersistenceService {
-    pub backend: Arc<dyn SessionPersistence>,
-}
-
 /// The JSONL persistence plugin: attaches a backend to the session store and
-/// provides it as the `sessionPersistence` service. Requires `sessions`.
+/// provides it as the `sessionPersistence` service **through the interface**
+/// (`Arc<dyn SessionPersistenceApi>`), so consumers never touch the concrete
+/// [`JsonlPersistence`]. Requires `sessions`.
 pub fn jsonl_persistence_plugin(dir: PathBuf) -> Arc<dyn Plugin> {
     plugin_with(
         "session-persistence",
@@ -167,14 +163,18 @@ pub fn jsonl_persistence_plugin(dir: PathBuf) -> Arc<dyn Plugin> {
                 let store = ctx
                     .get::<dsh_api::services::SessionService>(SESSIONS_SERVICE)
                     .ok_or_else(|| cordis::Error::msg("sessions service missing"))?;
-                let backend = Arc::new(JsonlPersistence::new(dir));
+                let backend = Arc::new(JsonlPersistence::new(dir))
+                    as Arc<dyn dsh_api::services::SessionPersistenceApi>;
                 store.attach_persistence(backend.clone());
-                ctx.provide("sessionPersistence", PersistenceService { backend }).await?;
+                ctx.provide(SESSION_PERSISTENCE_SERVICE, backend).await?;
                 Ok(())
             }
         },
     )
 }
+
+/// The `sessionPersistence` service key (interface-typed service value).
+pub const SESSION_PERSISTENCE_SERVICE: &str = "sessionPersistence";
 
 /// Re-export helper for tests.
 pub fn temp_dir(tag: &str) -> PathBuf {

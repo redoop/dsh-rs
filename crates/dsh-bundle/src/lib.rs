@@ -82,13 +82,27 @@ pub fn manifest_plugin() -> Arc<dyn Plugin> {
 }
 
 /// Register every bundle plugin's manifest on the manifest service. This is
-/// the declarative contract (`--dump-config` / coverage validation):
+/// the declarative contract (`dsh dump-config` / coverage validation):
 /// what each plugin provides, requires, and which tools it registers.
+///
+/// The contract of a plugin is what it DECLARES, independent of whether it
+/// was activated (e.g. `session-persistence` is only installed when a store
+/// dir is configured, but its contract is part of the base bundle). The
+/// `tools` manifest is filled from the live registry to avoid drift between
+/// this list and the actually registered built-ins.
 pub fn register_manifests(ctx: &Context) {
     let Some(manifest) = ctx.get::<dsh_api::services::ManifestService>(dsh_api::MANIFEST_SERVICE)
     else {
         return;
     };
+
+    // The contract registry itself.
+    manifest.register(
+        PluginManifest::new("manifest")
+            .describe("declarative plugin contracts and coverage validation")
+            .provides(dsh_api::MANIFEST_SERVICE, "manifest registry (ctx.manifest)"),
+    );
+
     manifest.register(
         PluginManifest::new("llm")
             .describe("model adapters and the LLM adapter seam")
@@ -110,18 +124,11 @@ pub fn register_manifests(ctx: &Context) {
         PluginManifest::new("tools")
             .describe("scoped tool registry and guarded execution pipeline")
             .provides(dsh_api::TOOLS_SERVICE, "tool registry (ctx.tools)")
-            .tools(vec![
-                dsh_types::ToolSchema {
-                    name: "bash".into(),
-                    description: "Run a shell command".into(),
-                    parameters: json!({"type": "object"}),
-                },
-                dsh_types::ToolSchema {
-                    name: "todo_write".into(),
-                    description: "Replace the agent todo list".into(),
-                    parameters: json!({"type": "object"}),
-                },
-            ]),
+            .tools(
+                ctx.get::<dsh_api::services::ToolsService>(dsh_api::TOOLS_SERVICE)
+                    .map(|registry| registry.schemas())
+                    .unwrap_or_default(),
+            ),
     );
     manifest.register(
         PluginManifest::new("system-prompt")
@@ -147,12 +154,13 @@ pub fn register_manifests(ctx: &Context) {
 pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<FiberHandle>, String> {
     let mut entries: Vec<BundleEntry> = Vec::new();
 
-    // 0. The manifest registry (contract layer) is always present.
-    // entries.push(BundleEntry {
-    //     name: "manifest",
-    //     plugin: manifest_plugin(),
-    //     config: None,
-    // });
+    // 0. The manifest registry (contract layer) is always present first: its
+    // `ctx.manifest` service is what `register_manifests` writes into later.
+    entries.push(BundleEntry {
+        name: "manifest",
+        plugin: manifest_plugin(),
+        config: None,
+    });
 
     // 1. LLM seam: the mock adapter is always registered; openai optional.
     let mut llm_config = json!({});
@@ -210,7 +218,7 @@ pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<Fiber
     }
 
     // Declare every plugin's contract on the manifest registry.
-    // register_manifests(ctx);
+    register_manifests(ctx);
 
     Ok(handles)
 }

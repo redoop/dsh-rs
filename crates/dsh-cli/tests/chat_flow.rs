@@ -15,10 +15,9 @@ use std::time::{Duration, Instant};
 
 use cordis::Context;
 use dsh_cli::tui::{attach_listener, ChatItem, ChatState, ChatTui};
-use dsh_api::services::AgentRegistryService;
-use dsh_core::AgentOptions;
-use dsh_llm::LlmRuntime;
 use serde_json::json;
+
+mod common;
 
 // ---------------------------------------------------------------------------
 // 1. Binary smoke test (real `dsh` executable, hermetic environment)
@@ -158,22 +157,11 @@ fn chat_line_mode_uses_the_configured_defaults() {
 // 2. TUI key handling (simulated input against a live harness)
 // ---------------------------------------------------------------------------
 
-/// Compose the minimal harness and return (ctx, agent).
+/// Compose the minimal harness through the base bundle and return (ctx, agent).
 async fn harness() -> (Context, Arc<dyn dsh_api::services::AgentView>) {
     let ctx = Context::new();
-    let llm = ctx.plugin(dsh_llm::llm_plugin(), Some(json!({})));
-    let sessions = ctx.plugin(dsh_session::session_plugin(), None);
-    let tools = ctx.plugin(dsh_tools::tools_plugin(), Some(serde_json::Value::Null));
-    let prompt = ctx.plugin(dsh_core::prompt::system_prompt_plugin(), None);
-    let agent_loop = ctx.plugin(dsh_core::agent_loop_plugin(), None);
-    for handle in [&llm, &sessions, &tools, &prompt, &agent_loop] {
-        handle.join().await.unwrap();
-    }
-    let agents = ctx.require::<AgentRegistryService>("agents").unwrap();
-    let agent = agents
-        .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
-        .unwrap();
-    let agent: Arc<dyn dsh_api::services::AgentView> = agent;
+    dsh_bundle::install_base_default(&ctx).await.unwrap();
+    let agent = common::create_agent(&ctx).await;
     (ctx, agent)
 }
 
@@ -567,21 +555,14 @@ async fn tui_renders_tool_activity() {
     let (ctx, agent) = harness().await;
 
     // Script the mock: a bash tool call, then the final answer.
-    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
-    runtime.unregister_adapter(&["mock"]);
-    runtime
-        .register_adapter(
-            &["mock"],
-            Arc::new(dsh_llm::adapters::mock::MockAdapter::scripted(vec![
-                dsh_llm::adapters::mock::MockAdapter::tool_call_response(
-                    "call-1",
-                    "bash",
-                    json!({ "command": "echo rendered-ok" }),
-                ),
-                dsh_llm::adapters::mock::MockAdapter::text_response("all done"),
-            ])),
-        )
-        .unwrap();
+    common::boot_scripted(
+        &ctx,
+        vec![
+            common::tool_call_response("call-1", "bash", json!({ "command": "echo rendered-ok" })),
+            common::text_response("all done"),
+        ],
+    )
+    .await;
 
     let state = Arc::new(Mutex::new(ChatState {
         session_id: Some(agent.id().to_string()),

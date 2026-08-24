@@ -4,23 +4,25 @@ use std::sync::{Arc, Mutex};
 
 use cordis::Context;
 use dsh_cli::tui::{attach_listener, ChatItem, ChatState};
-use dsh_api::services::AgentRegistryService;
-use dsh_core::AgentOptions;
-use dsh_llm::{ContentBlock, MessageSource, Role, StreamChunk};
-use dsh_session::{SessionEvent, SessionEventData, TurnEndReason, user_message};
+use dsh_types::{
+    ContentBlock, Message, MessageSource, Role, SessionEvent, SessionEventData, StreamChunk,
+    TurnEndReason,
+};
 use serde_json::json;
 
-fn user_event(text: &str) -> dsh_session::SessionEvent {
+mod common;
+
+fn user_event(text: &str) -> SessionEvent {
     SessionEvent::new(
         0,
         0,
         SessionEventData::UserMessage {
-            message: user_message("u-1", text),
+            message: Message::user("u-1", vec![ContentBlock::text(text)]),
         },
     )
 }
 
-fn chunk_event(text: &str) -> dsh_session::SessionEvent {
+fn chunk_event(text: &str) -> SessionEvent {
     SessionEvent::new(
         1,
         0,
@@ -35,14 +37,14 @@ fn chunk_event(text: &str) -> dsh_session::SessionEvent {
     )
 }
 
-fn assistant_event(text: &str) -> dsh_session::SessionEvent {
+fn assistant_event(text: &str) -> SessionEvent {
     SessionEvent::new(
         2,
         0,
         SessionEventData::AssistantMessage {
             turn: 1,
             step: 1,
-            message: dsh_llm::Message {
+            message: Message {
                 id: "a-1".into(),
                 role: Role::Assistant,
                 content: vec![ContentBlock::text(text)],
@@ -57,7 +59,7 @@ fn assistant_event(text: &str) -> dsh_session::SessionEvent {
     )
 }
 
-fn tool_call_event() -> dsh_session::SessionEvent {
+fn tool_call_event() -> SessionEvent {
     SessionEvent::new(
         3,
         0,
@@ -71,14 +73,14 @@ fn tool_call_event() -> dsh_session::SessionEvent {
     )
 }
 
-fn tool_result_event(text: &str, is_error: bool) -> dsh_session::SessionEvent {
+fn tool_result_event(text: &str, is_error: bool) -> SessionEvent {
     SessionEvent::new(
         4,
         0,
         SessionEventData::ToolResult {
             turn: 1,
             step: 2,
-            message: dsh_llm::Message {
+            message: Message {
                 id: "tr-call-1".into(),
                 role: Role::User,
                 content: vec![ContentBlock::ToolResult {
@@ -154,36 +156,16 @@ fn state_projects_a_full_step() {
 #[tokio::test]
 async fn listener_folds_live_session_events() {
     let ctx = Context::new();
-    let llm = ctx.plugin(dsh_llm::llm_plugin(), Some(json!({})));
-    let sessions = ctx.plugin(dsh_session::session_plugin(), None);
-    let tools = ctx.plugin(dsh_tools::tools_plugin(), Some(serde_json::Value::Null));
-    let prompt = ctx.plugin(dsh_core::prompt::system_prompt_plugin(), None);
-    let agent_loop = ctx.plugin(dsh_core::agent_loop_plugin(), None);
-    for handle in [&llm, &sessions, &tools, &prompt, &agent_loop] {
-        handle.join().await.unwrap();
-    }
+    common::boot_scripted(
+        &ctx,
+        vec![
+            common::tool_call_response("call-1", "bash", json!({ "command": "echo tui-ok" })),
+            common::text_response("tui done"),
+        ],
+    )
+    .await;
 
-    // Script the mock adapter: one tool call, then the final answer.
-    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
-    runtime.unregister_adapter(&["mock"]);
-    runtime
-        .register_adapter(
-            &["mock"],
-            Arc::new(dsh_llm::adapters::mock::MockAdapter::scripted(vec![
-                dsh_llm::adapters::mock::MockAdapter::tool_call_response(
-                    "call-1",
-                    "bash",
-                    json!({ "command": "echo tui-ok" }),
-                ),
-                dsh_llm::adapters::mock::MockAdapter::text_response("tui done"),
-            ])),
-        )
-        .unwrap();
-
-    let agents = ctx.require::<AgentRegistryService>("agents").unwrap();
-    let agent = agents
-        .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
-        .unwrap();
+    let agent = common::create_agent(&ctx).await;
 
     // Attach the TUI projection before any work happens.
     let state = Arc::new(Mutex::new(ChatState {
@@ -192,7 +174,7 @@ async fn listener_folds_live_session_events() {
     }));
     attach_listener(&ctx, agent.id().to_string(), state.clone()).await.unwrap();
 
-    agent.followup(dsh_core::agent::user_message_with_text("u-1", "run the tool"));
+    agent.followup(dsh_cli::user_message_with_text("u-1", "run the tool"));
     agent.when_idle().await;
 
     let state = state.lock().unwrap();

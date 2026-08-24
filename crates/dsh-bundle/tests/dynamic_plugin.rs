@@ -9,7 +9,7 @@ use std::sync::Arc;
 use cordis::{Context, Plugin};
 use dsh_bundle::{install_base_default, load_dynamic_plugin};
 use dsh_api::services::ToolsService;
-use dsh_tools::ToolExecutionResult;
+use dsh_types::ToolExecutionResult;
 use serde_json::json;
 
 /// The compiled plugin library, per-platform extension.
@@ -40,10 +40,10 @@ fn build_plugin() {
     );
 }
 
-fn run_ctx() -> dsh_tools::ToolRunContext {
-    dsh_tools::ToolRunContext {
+fn run_ctx() -> dsh_types::ToolRunContext {
+    dsh_types::ToolRunContext {
         ctx: Context::new(),
-        signal: dsh_llm::CancelToken::new(),
+        signal: dsh_types::CancelToken::new(),
         agent_id: Some("agent-test".to_string()),
         cwd: Some("/tmp".to_string()),
     }
@@ -139,9 +139,9 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
         .require::<dsh_api::services::AgentRegistryService>("agents")
         .unwrap();
     let agent = agents
-        .create(None, dsh_core::AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
+        .create(None, dsh_types::AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
-    agent.followup(dsh_core::agent::user_message_with_text("u-1", "use the plugin tool"));
+    agent.followup(dsh_types::Message::user("u-1", vec![dsh_types::ContentBlock::text("use the plugin tool")]));
     agent.when_idle().await;
 
     // The agent loop dispatched the dynamic tool and logged its result.
@@ -149,7 +149,7 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
     let tool_results: Vec<_> = events
         .iter()
         .filter_map(|e| match &e.data {
-            dsh_session::SessionEventData::ToolResult { message, .. } => {
+            dsh_types::SessionEventData::ToolResult { message, .. } => {
                 Some((message_tool_result_text(message), message_tool_result_is_error(message)))
             }
             _ => None,
@@ -188,12 +188,12 @@ fn abi_mismatch_is_rejected() {
 
 
 /// Extract text nested inside a message's tool-result blocks.
-fn message_tool_result_text(message: &dsh_llm::Message) -> String {
+fn message_tool_result_text(message: &dsh_types::Message) -> String {
     let mut out = String::new();
     for block in &message.content {
-        if let dsh_llm::ContentBlock::ToolResult { content, .. } = block {
+        if let dsh_types::ContentBlock::ToolResult { content, .. } = block {
             for inner in content {
-                if let dsh_llm::ContentBlock::Text { text } = inner {
+                if let dsh_types::ContentBlock::Text { text } = inner {
                     out.push_str(text);
                 }
             }
@@ -202,11 +202,11 @@ fn message_tool_result_text(message: &dsh_llm::Message) -> String {
     out
 }
 
-fn message_tool_result_is_error(message: &dsh_llm::Message) -> bool {
+fn message_tool_result_is_error(message: &dsh_types::Message) -> bool {
     message.content.iter().any(|block| {
         matches!(
             block,
-            dsh_llm::ContentBlock::ToolResult { is_error: Some(true), .. }
+            dsh_types::ContentBlock::ToolResult { is_error: Some(true), .. }
         )
     })
 }

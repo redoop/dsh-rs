@@ -44,11 +44,11 @@ pub fn agent_loop_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "agent-loop",
         vec![
-            Injection::new(dsh_session::SESSIONS_SERVICE.to_string()),
-            Injection::new(SYSTEM_PROMPT_SERVICE.to_string()),
-            Injection::new(dsh_tools::TOOLS_SERVICE.to_string()),
-            Injection::new(dsh_llm::LLM_SERVICE.to_string()),
-            Injection::new(dsh_llm::LLM_STREAMS_SERVICE.to_string()),
+            Injection::new(dsh_api::SESSIONS_SERVICE.to_string()),
+            Injection::new(dsh_api::SYSTEM_PROMPT_SERVICE.to_string()),
+            Injection::new(dsh_api::TOOLS_SERVICE.to_string()),
+            Injection::new(dsh_api::LLM_SERVICE.to_string()),
+            Injection::new(dsh_api::LLM_STREAMS_SERVICE.to_string()),
         ],
         |ctx, _config: Value| async move {
             let sessions = ctx

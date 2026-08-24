@@ -213,8 +213,8 @@ impl DynamicPlugin {
     }
 }
 
-/// Convert one dynamic-plugin result JSON into a [`dsh_tools::ToolExecutionResult`].
-fn to_tool_result(value: Value) -> dsh_tools::ToolExecutionResult {
+/// Convert one dynamic-plugin result JSON into a [`dsh_types::ToolExecutionResult`].
+fn to_tool_result(value: Value) -> dsh_types::ToolExecutionResult {
     match value.get("kind").and_then(|k| k.as_str()) {
         Some("success") => {
             let content = value
@@ -223,7 +223,7 @@ fn to_tool_result(value: Value) -> dsh_tools::ToolExecutionResult {
                 .unwrap_or("ok")
                 .to_string();
             let value_out = value.get("value").cloned().unwrap_or(Value::Null);
-            dsh_tools::ToolExecutionResult::success_text(content, value_out)
+            dsh_types::ToolExecutionResult::success_text(content, value_out)
         }
         _ => {
             let message = value
@@ -236,7 +236,7 @@ fn to_tool_result(value: Value) -> dsh_tools::ToolExecutionResult {
                 .and_then(|c| c.as_str())
                 .unwrap_or("PLUGIN_ERROR")
                 .to_string();
-            dsh_tools::ToolExecutionResult::error(code, message)
+            dsh_types::ToolExecutionResult::error(code, message)
         }
     }
 }
@@ -299,14 +299,14 @@ impl Plugin for DynamicPlugin {
                                         })
                                         .await
                                         .map_err(|e| {
-                                            dsh_tools::ToolExecutionResult::error(
+                                            dsh_types::ToolExecutionResult::error(
                                                 "PLUGIN_JOIN",
                                                 e.to_string(),
                                             )
                                         })
                                         .and_then(|result| {
                                             result.map_err(|e| {
-                                                dsh_tools::ToolExecutionResult::error(
+                                                dsh_types::ToolExecutionResult::error(
                                                     "PLUGIN_CALL",
                                                     e.to_string(),
                                                 )
@@ -316,7 +316,7 @@ impl Plugin for DynamicPlugin {
                                             serde_json::from_str::<Value>(&json)
                                                 .map(to_tool_result)
                                                 .unwrap_or_else(|e| {
-                                                    dsh_tools::ToolExecutionResult::error(
+                                                    dsh_types::ToolExecutionResult::error(
                                                         "PLUGIN_RESULT",
                                                         e.to_string(),
                                                     )

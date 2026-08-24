@@ -10,7 +10,7 @@ use cordis::Context;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
-use dsh_types::{SessionEvent, TodoItem};
+use dsh_types::SessionEvent;
 
 /// A typed event: name + payload are bound together.
 pub trait EventPayload: Serialize + DeserializeOwned + Send + Sync + 'static {
@@ -92,12 +92,6 @@ impl EventPayload for AgentErrorPayload {
 pub struct SystemPromptChangePayload;
 impl EventPayload for SystemPromptChangePayload {
     const NAME: &'static str = "system-prompt/change";
-}
-
-/// `todo/write` snapshot carried inside a session event.
-#[derive(Debug, Clone, Serialize, serde::Deserialize)]
-pub struct TodoWriteData {
-    pub todos: Vec<TodoItem>,
 }
 
 // ---------------------------------------------------------------------------

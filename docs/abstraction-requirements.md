@@ -131,11 +131,18 @@ dsh-rs 以 cordis-rs 为内核，一切皆为插件：`llm`、`sessions`、`tool
 
 ## 8. 验收标准（汇总）
 
-1. `cargo build --workspace` 通过（分支回滚前已通过；需重新现场确认）。
-2. `cargo test --workspace` 全绿，测试规模 ≥ 69（**当前待补验证**，设计文档 §9.5）。
-3. `dsh dump-config` 现场运行：输出六插件清单 JSON，agent-loop 的 5 个 `requires` 均被满足；人为移除某 provide 时校验报错（**当前待补验证**）。
+1. `cargo build --workspace` 通过（**已验证**：`--all-targets` 全量编译零警告）。
+2. `cargo test --workspace` 全绿，测试规模 ≥ 69（**已验证至编译层**：69 个测试
+   及全部测试二进制经 `cargo test --no-run` 编译通过；测试**运行**需可执行环境
+   补跑 —— 当前宿主沙箱挂起非白名单二进制执行，见设计文档 §9.5）。
+3. `dsh dump-config` 现场运行：输出七份清单 JSON（manifest / llm / sessions /
+   session-persistence / tools / system-prompt / agent-loop），agent-loop 的 5 个
+   `requires` 均被满足；人为移除某 provide 时校验报错（**运行验证待补**；
+   代码路径已接线：manifest 插件随 base bundle 安装，`register_manifests`
+   收敛后登记，CLI `dump-config` 读取并校验）。
 4. 编译期类型安全演示：修改任一 session/agent payload 结构，生产端与监听端同时编译失败。
-5. 消费者 crate 静态依赖检查：无实现对 `dsh-llm`/`dsh-session`/`dsh-tools`/`dsh-core` 的类型依赖。
+5. 消费者 crate 静态依赖检查：`dsh-cli` 仅依赖 `dsh-api` / `dsh-types` /
+   `dsh-bundle`（不含实现 crate；`cargo metadata` 已确认），源码零实现 crate 引用。
 
 ---
 
@@ -156,7 +163,7 @@ dsh-rs 以 cordis-rs 为内核，一切皆为插件：`llm`、`sessions`、`tool
 | R-1 | 瀑布事件未类型化，`agent/pre-step` 等仍靠显式 Value | 已有 typed helper 思路（payload 类型化 + 保留 next），列入后续版本 | 开放 |
 | R-2 | `llmStreams` 以具体 `StreamTable` 暴露，是"跨插件传输流句柄"的实现通道 | 可评估抽 `StreamTableApi` | 开放 |
 | R-3 | 手写 manifest 与实际 `inject`/`provides` 漂移 | 运行时校验是对冲手段；build-time 生成式清单为长期方案 | 开放 |
-| R-4 | **验证缺口**：`cargo test --workspace` 与 `dsh dump-config` 最终现场验证未完成（曾受执行环境故障影响） | 补跑验证 | **待补** |
+| R-4 | **验证缺口**：`cargo test --workspace` 与 `dsh dump-config` 的运行验证未完成（宿主沙箱挂起非白名单二进制执行；编译层已验证） | 在可执行环境补跑验证 | **待补（编译层已验证）** |
 
 ---
 

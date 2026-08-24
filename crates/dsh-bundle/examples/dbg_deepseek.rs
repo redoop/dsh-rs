@@ -1,8 +1,13 @@
 //! dbg_deepseek — 直接驱动 LLM 适配器，输出每个 chunk / 错误，便于排查
 //! 真实提供者的对接问题。运行：cargo run -p dsh-bundle --example dbg_deepseek
+//!
+//! 消费者侧只使用 `dsh-api` 的服务 wrapper（`LlmService`）与 `dsh-types`
+//! 词汇（chunk 组装仍复用实现 crate 的 `BlockAssembler`，bundle 本就依赖它）。
 
 use cordis::Context;
-use dsh_llm::{BlockAssembler, GenerateOptions, LlmRuntime, Message, StreamChunk};
+use dsh_api::services::LlmService;
+use dsh_llm::BlockAssembler;
+use dsh_types::{ContentBlock, GenerateOptions, Message, StreamChunk, ToolSchema};
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
@@ -14,7 +19,7 @@ async fn main() -> Result<(), String> {
     let ctx = Context::new();
     dsh_bundle::install_base(&ctx, config).await?;
 
-    let runtime = ctx.require::<LlmRuntime>("llm").map_err(|e| e.to_string())?;
+    let runtime = ctx.require::<LlmService>("llm").map_err(|e| e.to_string())?;
     println!("providers: {:?}", runtime.list_providers());
 
     let tools = std::env::var("DSH_TOOLS").map(|_| true).unwrap_or(false);
@@ -22,11 +27,11 @@ async fn main() -> Result<(), String> {
     let options = GenerateOptions {
         provider: "deepseek".to_string(),
         model: "deepseek-v4-flash".to_string(),
-        messages: vec![Message::user("u-1", vec![dsh_llm::ContentBlock::text("hi")])],
+        messages: vec![Message::user("u-1", vec![ContentBlock::text("hi")])],
         system: if with_system { Some("You are a helpful assistant.".to_string()) } else { None },
         tools: if tools {
             Some(vec![
-                dsh_llm::ToolSchema {
+                ToolSchema {
                     name: "bash".to_string(),
                     description: "Run a shell command.".to_string(),
                     parameters: serde_json::json!({
