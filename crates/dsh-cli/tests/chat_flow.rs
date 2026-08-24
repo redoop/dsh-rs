@@ -554,9 +554,11 @@ async fn tui_renders_long_input_without_overflow() {
 async fn tui_renders_tool_activity() {
     let (ctx, agent) = harness().await;
 
-    // Script the mock: a bash tool call, then the final answer.
+    // Script the mock: a bash tool call, then the final answer. The bundle is
+    // already installed by `harness()`, so only swap the adapter.
     common::boot_scripted(
         &ctx,
+        false,
         vec![
             common::tool_call_response("call-1", "bash", json!({ "command": "echo rendered-ok" })),
             common::text_response("all done"),

@@ -158,6 +158,7 @@ async fn listener_folds_live_session_events() {
     let ctx = Context::new();
     common::boot_scripted(
         &ctx,
+        true,
         vec![
             common::tool_call_response("call-1", "bash", json!({ "command": "echo tui-ok" })),
             common::text_response("tui done"),

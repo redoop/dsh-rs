@@ -110,9 +110,14 @@ pub fn tool_call_response(id: &str, name: &str, arguments: Value) -> Vec<StreamC
     ]
 }
 
-/// Boot the base bundle and mount `script` as the `mock` provider route.
-pub async fn boot_scripted(ctx: &Context, script: Vec<Vec<StreamChunk>>) {
-    dsh_bundle::install_base_default(ctx).await.expect("base bundle boots");
+/// Boot the base bundle (if `install` is true) and mount `script` as the
+/// `mock` provider route. When the harness already installed the bundle,
+/// pass `false` to only swap the adapter (installing twice would re-register
+/// every service in the same scope).
+pub async fn boot_scripted(ctx: &Context, install: bool, script: Vec<Vec<StreamChunk>>) {
+    if install {
+        dsh_bundle::install_base_default(ctx).await.expect("base bundle boots");
+    }
     let runtime = ctx
         .require::<LlmService>(dsh_api::LLM_SERVICE)
         .expect("llm service live");
