@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use cordis::{Context, Plugin};
 use dsh_bundle::{install_base_default, load_dynamic_plugin};
-use dsh_tools::{ToolExecutionResult, ToolRegistry, ToolRunContext};
+use dsh_api::services::ToolsService;
+use dsh_tools::ToolExecutionResult;
 use serde_json::json;
 
 /// The compiled plugin library, per-platform extension.
@@ -39,8 +40,8 @@ fn build_plugin() {
     );
 }
 
-fn run_ctx() -> ToolRunContext {
-    ToolRunContext {
+fn run_ctx() -> dsh_tools::ToolRunContext {
+    dsh_tools::ToolRunContext {
         ctx: Context::new(),
         signal: dsh_llm::CancelToken::new(),
         agent_id: Some("agent-test".to_string()),
@@ -67,7 +68,7 @@ async fn dynamic_plugin_registers_and_executes_a_tool() {
     let fiber = ctx.plugin(plugin, None);
     fiber.join().await.expect("dynamic plugin activates");
 
-    let tools = ctx.require::<ToolRegistry>("tools").unwrap();
+    let tools = ctx.require::<ToolsService>("tools").unwrap();
     let names = tools.list();
     assert!(
         names.contains(&"dsh_hello".to_string()),
@@ -118,7 +119,7 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
     fiber.join().await.unwrap();
 
     // Script the mock adapter: first call dsh_hello, then finish.
-    let runtime = ctx.require::<dsh_llm::LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -134,7 +135,9 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
         )
         .unwrap();
 
-    let agents = ctx.require::<dsh_core::AgentRegistry>("agents").unwrap();
+    let agents = ctx
+        .require::<dsh_api::services::AgentRegistryService>("agents")
+        .unwrap();
     let agent = agents
         .create(None, dsh_core::AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
@@ -142,7 +145,7 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
     agent.when_idle().await;
 
     // The agent loop dispatched the dynamic tool and logged its result.
-    let events = agent.session.events();
+    let events = agent.session().events();
     let tool_results: Vec<_> = events
         .iter()
         .filter_map(|e| match &e.data {
@@ -159,7 +162,7 @@ async fn dynamic_plugin_serves_the_full_agent_loop() {
         text.contains("hello from dynamic plugin"),
         "tool result missing: {text:?}"
     );
-    let messages = agent.session.derive_messages();
+    let messages = agent.session().derive_messages();
     assert_eq!(messages.last().unwrap().text(), "plugin said hello");
 }
 

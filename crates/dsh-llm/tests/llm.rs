@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use dsh_api::services::LlmService;
 use dsh_llm::{
     llm_plugin, stream_via_waterfall, BlockAssembler, CancelToken, ContentBlock, FinishReason,
     GenerateOptions, LlmAdapter, LlmRuntime, Message, MessageSource, Role, StreamChunk,
@@ -155,7 +156,7 @@ async fn waterfall_dispatches_stream() {
     let ctx = cordis::Context::new();
     let handle = ctx.plugin(llm_plugin(), Some(serde_json::json!({})));
     handle.join().await.unwrap();
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<LlmService>("llm").unwrap();
     let streams = ctx.require::<StreamTable>("llmStreams").unwrap();
 
     let options = GenerateOptions {

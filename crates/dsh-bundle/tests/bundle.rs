@@ -1,7 +1,7 @@
 use cordis::Context;
 use dsh_bundle::{BaseConfig, install_base, install_profile};
 use dsh_session::SessionPersistence;
-use dsh_core::{AgentOptions, AgentRegistry};
+use dsh_core::AgentOptions;
 use serde_json::json;
 
 #[tokio::test]
@@ -11,24 +11,24 @@ async fn base_bundle_boots_and_runs_an_agent() {
     assert_eq!(handles.len(), 5);
 
     // All service seams are live.
-    assert!(ctx.get::<dsh_llm::LlmRuntime>("llm").is_some());
-    assert!(ctx.get::<dsh_session::SessionStore>("sessions").is_some());
-    assert!(ctx.get::<dsh_tools::ToolRegistry>("tools").is_some());
-    assert!(ctx.get::<dsh_core::SystemPromptService>("systemPrompt").is_some());
-    assert!(ctx.get::<AgentRegistry>("agents").is_some());
+    assert!(ctx.get::<dsh_api::services::LlmService>("llm").is_some());
+    assert!(ctx.get::<dsh_api::services::SessionService>("sessions").is_some());
+    assert!(ctx.get::<dsh_api::services::ToolsService>("tools").is_some());
+    assert!(ctx.get::<dsh_api::services::SystemPromptService>("systemPrompt").is_some());
+    assert!(ctx.get::<dsh_api::services::AgentRegistryService>("agents").is_some());
 
     // A full turn runs against the mock provider.
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
     agent.followup(dsh_core::agent::user_message_with_text("u-1", "hello"));
     agent.when_idle().await;
-    let text = agent.session.derive_messages();
+    let text = agent.session().derive_messages();
     let last = text.last().unwrap();
     assert_eq!(last.text(), "hello"); // mock echoes the last user message
     let ends = agent
-        .session
+        .session()
         .events()
         .iter()
         .filter(|e| matches!(e.data, dsh_session::SessionEventData::TurnEnd { .. }))
@@ -45,7 +45,7 @@ async fn profile_install_stacks_base_bundle() {
     });
     let handles = install_profile(&ctx, &profile).await.unwrap();
     assert_eq!(handles.len(), 5);
-    assert!(ctx.get::<dsh_llm::LlmRuntime>("llm").is_some());
+    assert!(ctx.get::<dsh_api::services::LlmService>("llm").is_some());
 }
 
 #[tokio::test]
@@ -75,15 +75,15 @@ async fn bundle_with_persistence_records_sessions() {
     .await
     .unwrap();
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(Some("persisted-session".into()), AgentOptions::mock("mock-1"), None, None)
         .unwrap();
     agent.followup(dsh_core::agent::user_message_with_text("u-1", "hi"));
     agent.when_idle().await;
 
-    let store = ctx.require::<dsh_session::SessionStore>("sessions").unwrap();
-    store.flush(&agent.session).await.unwrap();
+    let store = ctx.require::<dsh_api::services::SessionService>("sessions").unwrap();
+    store.flush(agent.id()).await.unwrap();
     assert!(dir.join("persisted-session.jsonl").exists());
 
     let backend = dsh_session::JsonlPersistence::new(dir.clone());

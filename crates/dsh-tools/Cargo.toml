@@ -7,6 +7,8 @@ description = "Scoped tool registry and guarded execution pipeline for dsh-rs."
 
 [dependencies]
 cordis.workspace = true
+dsh-types = { path = "../dsh-types" }
+dsh-api = { path = "../dsh-api" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

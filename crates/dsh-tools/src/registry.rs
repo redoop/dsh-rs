@@ -11,89 +11,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cordis::{plugin, Context, Plugin};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use cordis::plugin::BoxFuture;
-use dsh_llm::{CancelToken, ContentBlock, ToolSchema};
+use dsh_llm::ToolSchema;
+use dsh_types::{ToolCallArgs, ToolExecutionResult, ToolRunContext};
 
 /// The `tools` service key.
 pub const TOOLS_SERVICE: &str = "tools";
-
-/// Parsed arguments for one tool call (tools validate their own schema).
-#[derive(Debug, Clone)]
-pub struct ToolCallArgs {
-    pub call_id: String,
-    pub name: String,
-    pub arguments: Value,
-}
-
-/// Runtime context handed to a tool body.
-#[derive(Clone)]
-pub struct ToolRunContext {
-    /// The dispatching (agent-scoped) context, for nested dispatch.
-    pub ctx: Context,
-    /// Cooperative cancellation for this execution.
-    pub signal: CancelToken,
-    /// The agent on whose behalf the call runs.
-    pub agent_id: Option<String>,
-    /// Working directory the tool resolves relative paths against.
-    pub cwd: Option<String>,
-}
-
-/// The model-facing outcome of one tool call.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum ToolExecutionResult {
-    Success {
-        content: Vec<ContentBlock>,
-        value: Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        meta: Option<Value>,
-    },
-    Error {
-        message: String,
-        code: String,
-        content: Vec<ContentBlock>,
-    },
-}
-
-impl ToolExecutionResult {
-    pub fn success_text(text: impl Into<String>, value: Value) -> Self {
-        ToolExecutionResult::Success {
-            content: vec![ContentBlock::text(text)],
-            value,
-            meta: None,
-        }
-    }
-
-    pub fn success_value(value: Value) -> Self {
-        let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
-        ToolExecutionResult::success_text(text, value)
-    }
-
-    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
-        let message: String = message.into();
-        let code: String = code.into();
-        ToolExecutionResult::Error {
-            message: message.clone(),
-            code,
-            content: vec![ContentBlock::text(format!("Error: {message}"))],
-        }
-    }
-
-    pub fn is_error(&self) -> bool {
-        matches!(self, ToolExecutionResult::Error { .. })
-    }
-
-    /// The model-facing content of this outcome.
-    pub fn content(&self) -> Vec<ContentBlock> {
-        match self {
-            ToolExecutionResult::Success { content, .. } => content.clone(),
-            ToolExecutionResult::Error { content, .. } => content.clone(),
-        }
-    }
-}
 
 /// One registered tool: schema plus the execution function.
 pub struct ToolDefinition {
@@ -322,8 +247,54 @@ impl ToolRegistry {
 pub fn tools_plugin() -> Arc<dyn Plugin> {
     plugin("tools", |ctx, _config: Value| async move {
         let registry = ToolRegistry::new(ctx.clone());
-        ctx.provide(TOOLS_SERVICE, registry.clone()).await?;
+        let api: Arc<dyn dsh_api::services::ToolRegistryApi> = Arc::new(registry.clone());
+        ctx.provide(TOOLS_SERVICE, dsh_api::services::ToolsService::new(api))
+            .await?;
         crate::builtin::register_builtin_tools(&registry)?;
         Ok(())
     })
+}
+
+
+impl dsh_api::services::ToolRegistryApi for ToolRegistry {
+    fn schemas(&self) -> Vec<dsh_llm::ToolSchema> {
+        self.schemas()
+    }
+
+    fn list(&self) -> Vec<String> {
+        self.list()
+    }
+
+    fn execute(
+        &self,
+        call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+        run_ctx: dsh_types::ToolRunContext,
+    ) -> dsh_api::services::BoxFuture<dsh_types::ToolExecutionResult> {
+        let registry = self.clone();
+        Box::pin(async move {
+            registry
+                .execute(call_id, name, arguments, run_ctx)
+                .await
+        })
+    }
+
+    fn register_dynamic_tool(&self, spec: dsh_api::services::DynamicToolSpec) {
+        let exec = spec.exec.clone();
+        let definition = ToolDefinition::new(
+            spec.name.clone(),
+            spec.description.clone(),
+            spec.parameters.clone(),
+            move |args: dsh_types::ToolCallArgs, _run_ctx: dsh_types::ToolRunContext| {
+                let exec = exec.clone();
+                Box::pin(async move { exec(args.arguments).await })
+            },
+        );
+        self.register(Arc::new(definition));
+    }
+
+    fn unregister_dynamic_tool(&self, name: &str) {
+        self.unregister(name)
+    }
 }

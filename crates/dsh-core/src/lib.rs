@@ -8,21 +8,23 @@
 pub mod agent;
 pub mod loop_driver;
 pub mod prompt;
-pub mod todo;
 
 use std::sync::Arc;
 
 use cordis::plugin::{plugin_with, Injection, Plugin};
 use serde_json::Value;
 
-use dsh_session::SessionStore;
-use dsh_tools::ToolRegistry;
+use dsh_api::services::{
+    AgentRegistryService, LlmService, SessionService, SystemPromptService as SystemPromptApiService,
+    ToolsService,
+};
 
-pub use agent::{AGENTS_SERVICE, Agent, AgentCancelCause, AgentOptions, AgentRegistry, AgentStatus};
+pub use agent::{AGENTS_SERVICE, Agent, AgentRegistry};
+pub use dsh_types::{AgentCancelCause, AgentOptions, AgentStatus};
 pub use loop_driver::injected_message;
+pub use dsh_types::PromptAssembly;
 pub use prompt::{
-    SYSTEM_PROMPT_SERVICE, PromptAssembly, PromptContext, PromptSection, PromptText,
-    SystemPromptService,
+    SYSTEM_PROMPT_SERVICE, PromptContext, PromptSection, PromptText, SystemPromptService,
 };
 
 /// Errors from agent operations.
@@ -50,22 +52,29 @@ pub fn agent_loop_plugin() -> Arc<dyn Plugin> {
         ],
         |ctx, _config: Value| async move {
             let sessions = ctx
-                .require::<SessionStore>(dsh_session::SESSIONS_SERVICE)?
+                .require::<SessionService>(dsh_api::SESSIONS_SERVICE)?
                 .as_ref()
                 .clone();
             let prompt = ctx
-                .require::<SystemPromptService>(SYSTEM_PROMPT_SERVICE)?
+                .require::<SystemPromptApiService>(dsh_api::SYSTEM_PROMPT_SERVICE)?
                 .as_ref()
                 .clone();
             let tools = ctx
-                .require::<ToolRegistry>(dsh_tools::TOOLS_SERVICE)?
+                .require::<ToolsService>(dsh_api::TOOLS_SERVICE)?
                 .as_ref()
                 .clone();
+            let llm = ctx
+                .require::<LlmService>(dsh_api::LLM_SERVICE)?
+                .as_ref()
+                .clone();
+            let _ = llm;
 
             let _ = prompt;
             let registry = AgentRegistry::new(ctx.clone(), sessions);
-            ctx.provide(AGENTS_SERVICE, registry.clone()).await?;
-            crate::todo::register_todo_tool(&tools);
+            let api: std::sync::Arc<dyn dsh_api::services::AgentRegistryApi> =
+                std::sync::Arc::new(registry.clone());
+            ctx.provide(AGENTS_SERVICE, AgentRegistryService::new(api)).await?;
+            let _ = tools;
             Ok(())
         },
     )

@@ -12,9 +12,8 @@ use serde_json::{json, Value};
 use dsh_llm::ContentBlock;
 
 use crate::matcher::glob_match;
-use crate::registry::{
-    ToolCallArgs, ToolDefinition, ToolExecutionResult, ToolRegistry, ToolRunContext,
-};
+use crate::registry::{ToolDefinition, ToolRegistry};
+use crate::{ToolCallArgs, ToolExecutionResult, ToolRunContext};
 
 /// Register every built-in tool on the registry.
 pub fn register_builtin_tools(registry: &ToolRegistry) -> Result<(), Error> {
@@ -24,7 +23,85 @@ pub fn register_builtin_tools(registry: &ToolRegistry) -> Result<(), Error> {
     registry.register(edit_file_tool());
     registry.register(glob_tool());
     registry.register(grep_tool());
+    registry.register(todo_write_tool());
     Ok(())
+}
+
+/// The `todo_write` tool: replaces the calling agent's whole todo list by
+/// appending a `todo/write` session event through the (interface) session
+/// service.
+fn todo_write_tool() -> Arc<ToolDefinition> {
+    let parameters = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": { "type": "string" },
+                        "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+                    },
+                    "required": ["content"]
+                }
+            }
+        },
+        "required": ["todos"]
+    });
+    Arc::new(ToolDefinition::new(
+        "todo_write",
+        "Replace the agent's whole todo list. Use to track multi-step work; the list is overwritten on every call.",
+        parameters,
+        |args: ToolCallArgs, run_ctx: ToolRunContext| {
+            Box::pin(async move {
+                let parsed: serde_json::Value = match serde_json::from_value(args.arguments.clone()) {
+                    Ok(parsed) => parsed,
+                    Err(err) => return ToolExecutionResult::error("INVALID_ARGS", err.to_string()),
+                };
+                let Some(agent_id) = run_ctx.agent_id.clone() else {
+                    return ToolExecutionResult::error("NO_AGENT", "tool called without an agent");
+                };
+                let Some(sessions) = run_ctx.ctx.get::<dsh_api::services::SessionService>("sessions")
+                else {
+                    return ToolExecutionResult::error("NO_SESSIONS", "sessions service unavailable");
+                };
+                let Some(session) = sessions.get(&agent_id) else {
+                    return ToolExecutionResult::error(
+                        "NO_SESSION",
+                        format!("no live session for agent {agent_id}"),
+                    );
+                };
+                let todos: Vec<dsh_types::TodoItem> = parsed
+                    .get("todos")
+                    .and_then(|t| t.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|entry| dsh_types::TodoItem {
+                                content: entry
+                                    .get("content")
+                                    .and_then(|c| c.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                status: match entry
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                {
+                                    Some("in_progress") => dsh_types::TodoStatus::InProgress,
+                                    Some("completed") => dsh_types::TodoStatus::Completed,
+                                    _ => dsh_types::TodoStatus::Pending,
+                                },
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                session.append(dsh_types::SessionEventData::TodoWrite { todos: todos.clone() });
+                ToolExecutionResult::success_text(
+                    format!("todo list updated ({} items)", todos.len()),
+                    serde_json::json!({ "todos": todos }),
+                )
+            })
+        },
+    ))
 }
 
 fn resolve_path(run_ctx: &ToolRunContext, raw: &str) -> PathBuf {

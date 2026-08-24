@@ -14,7 +14,8 @@ use std::sync::Arc;
 use cordis::{Context, Plugin};
 use dsh_cli::{last_assistant_text, load_profile, parse_args};
 use dsh_core::agent::user_message_with_text;
-use dsh_core::{AgentOptions, AgentRegistry, AGENTS_SERVICE};
+use dsh_api::services::{AgentRegistryService, AgentView};
+use dsh_core::AgentOptions;
 use serde_json::Value;
 
 fn main() {
@@ -38,6 +39,7 @@ fn main() {
         "transcript" => rt.block_on(cmd_transcript(&flags, &positionals)),
         "providers" => rt.block_on(cmd_providers(&flags)),
         "plugin" => rt.block_on(cmd_plugin_load(&flags, &positionals)),
+        "dump-config" | "manifests" => rt.block_on(cmd_dump_config(&flags)),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -105,9 +107,9 @@ async fn cmd_run(
     flush_session(&ctx, &agent).await;
 
     if flags.contains_key("print-json") {
-        println!("{}", serde_json::to_string_pretty(&agent.session.events()).unwrap());
+        println!("{}", serde_json::to_string_pretty(&agent.session().events()).unwrap());
     } else {
-        println!("{}", last_assistant_text(&agent.session));
+        println!("{}", last_assistant_text(agent.session().as_ref()));
     }
     let _ = ctx;
     Ok(())
@@ -135,7 +137,7 @@ async fn cmd_chat(
 }
 
 /// Simple line-based chat loop for piped input / non-TTY use.
-async fn line_chat(ctx: &Context, agent: &Arc<dsh_core::Agent>) -> Result<(), String> {
+async fn line_chat(ctx: &Context, agent: &Arc<dyn AgentView>) -> Result<(), String> {
     println!("dsh chat — type a line, Ctrl-D to exit");
     use std::io::BufRead;
     let stdin = std::io::stdin();
@@ -150,7 +152,7 @@ async fn line_chat(ctx: &Context, agent: &Arc<dsh_core::Agent>) -> Result<(), St
         agent.followup(user_message_with_text(format!("u-{seq}"), line));
         agent.when_idle().await;
         flush_session(ctx, agent).await;
-        println!("{}", last_assistant_text(&agent.session));
+        println!("{}", last_assistant_text(agent.session().as_ref()));
     }
     Ok(())
 }
@@ -174,6 +176,34 @@ async fn cmd_transcript(
     }
     for event in &events {
         println!("{}", dsh_session::Session::render_event(event));
+    }
+    Ok(())
+}
+
+async fn cmd_dump_config(
+    flags: &std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    let (ctx, _handles, _config) = boot(flags).await?;
+    let manifest = ctx
+        .get::<dsh_api::services::ManifestService>(dsh_api::MANIFEST_SERVICE)
+        .ok_or_else(|| "manifest service missing — is the base bundle installed?".to_string())?;
+
+    let manifests = manifest.list();
+    let printable = manifests
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    println!("{}", serde_json::to_string_pretty(&printable).unwrap());
+
+    let missing = dsh_api::manifest::ManifestRegistry::new().validate_coverage(&manifests);
+    if missing.is_empty() {
+        println!("dependency coverage: OK");
+    } else {
+        for m in &missing {
+            eprintln!("missing: {m}");
+        }
+        return Err(format!("{} unsatisfied dependency(ies)", missing.len()));
     }
     Ok(())
 }
@@ -209,7 +239,7 @@ async fn cmd_plugin_load(
         println!("declared tools: {}", declared_tools.join(", "));
     }
     let tools = ctx
-        .get::<dsh_tools::ToolRegistry>("tools")
+        .get::<dsh_api::services::ToolsService>("tools")
         .map(|registry| registry.list())
         .unwrap_or_default();
     println!("tools now registered: {}", tools.join(", "));
@@ -219,7 +249,7 @@ async fn cmd_plugin_load(
 async fn cmd_providers(flags: &std::collections::HashMap<String, String>) -> Result<(), String> {
     let (ctx, _handles, _config) = boot(flags).await?;
     let runtime = ctx
-        .require::<dsh_llm::LlmRuntime>("llm")
+        .require::<dsh_api::services::LlmService>("llm")
         .map_err(|e| e.to_string())?;
     for provider in runtime.list_providers() {
         println!("{}\t({})", provider.id, provider.name);
@@ -294,9 +324,9 @@ fn discover_default_config() -> dsh_bundle::BaseConfig {
 }
 
 /// Flush the agent's session to any attached persistence backend.
-async fn flush_session(ctx: &Context, agent: &Arc<dsh_core::Agent>) {
-    if let Some(store) = ctx.get::<dsh_session::SessionStore>("sessions") {
-        let _ = store.flush(&agent.session).await;
+async fn flush_session(ctx: &Context, agent: &Arc<dyn AgentView>) {
+    if let Some(store) = ctx.get::<dsh_api::services::SessionService>("sessions") {
+        let _ = store.flush(agent.id()).await;
     }
 }
 
@@ -304,7 +334,7 @@ async fn create_agent(
     ctx: &Context,
     flags: &std::collections::HashMap<String, String>,
     config: &dsh_bundle::BaseConfig,
-) -> Result<Arc<dsh_core::Agent>, String> {
+) -> Result<Arc<dyn AgentView>, String> {
     let runtime = ctx.get::<dsh_llm::LlmRuntime>("llm");
     let has_deepseek = runtime.is_some_and(|r| r.has_provider("deepseek"));
 
@@ -329,7 +359,7 @@ async fn create_agent(
     let max_tokens = flag(flags, "max-tokens").and_then(|v| v.parse::<u32>().ok());
     let cwd = flag(flags, "cwd");
     let agents = ctx
-        .get::<AgentRegistry>(AGENTS_SERVICE)
+        .get::<AgentRegistryService>(dsh_api::AGENTS_SERVICE)
         .ok_or_else(|| "agents service missing — is the base bundle installed?".to_string())?;
     let agent = agents
         .create(

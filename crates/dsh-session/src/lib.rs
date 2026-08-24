@@ -20,7 +20,8 @@ pub use persistence::{
     repair_crash_turns,
 };
 pub use session::{Session, user_message};
-pub use store::{CreateSessionOptions, SESSIONS_SERVICE, SessionStore, session_plugin};
+pub use dsh_types::CreateSessionOptions;
+pub use store::{SESSIONS_SERVICE, SessionStore, session_plugin};
 
 /// Errors from session operations.
 #[derive(Debug, thiserror::Error)]

@@ -32,7 +32,7 @@ async fn lists_builtin_tools() {
     assert!(names.contains(&"edit_file".to_string()));
     assert!(names.contains(&"glob".to_string()));
     assert!(names.contains(&"grep".to_string()));
-    assert_eq!(registry.schemas().len(), 6);
+    assert_eq!(registry.schemas().len(), 7);
 }
 
 #[tokio::test]
@@ -307,8 +307,8 @@ async fn tools_plugin_provides_registry() {
     let ctx = cordis::Context::new();
     let handle = ctx.plugin(tools_plugin(), Some(Value::Null));
     handle.join().await.unwrap();
-    let registry = ctx.require::<ToolRegistry>("tools").unwrap();
-    assert_eq!(registry.list().len(), 6);
+    let registry = ctx.require::<dsh_api::services::ToolsService>("tools").unwrap();
+    assert_eq!(registry.list().len(), 7);
 }
 
 #[tokio::test]

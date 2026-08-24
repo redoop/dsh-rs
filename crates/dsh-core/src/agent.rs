@@ -6,58 +6,20 @@
 //! [`crate::loop_driver::drive`] loop.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cordis::Context;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use dsh_llm::{CancelToken, Message, MessageSource, Role};
-use dsh_session::{CreateSessionOptions, Session, SessionId, SessionStore, user_message};
+use dsh_api::services::{SessionService, SessionView};
+use dsh_session::{CreateSessionOptions, SessionId, user_message};
+use dsh_types::{AgentCancelCause, AgentOptions, AgentStatus};
 
 
 /// The `agents` service key.
 pub const AGENTS_SERVICE: &str = "agents";
-
-/// Creation options for one agent.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AgentOptions {
-    pub provider: String,
-    pub model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-}
-
-impl AgentOptions {
-    pub fn mock(model: impl Into<String>) -> Self {
-        AgentOptions {
-            provider: "mock".to_string(),
-            model: model.into(),
-            max_tokens: None,
-        }
-    }
-}
-
-/// An agent's lifecycle state: `idle` means no driver activity; `running`
-/// spans the driver draining its inbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentStatus {
-    Idle,
-    Running,
-}
-
-/// Why an active driver was cancelled.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum AgentCancelCause {
-    User,
-    Parent,
-    Hook { reason: String },
-    Disposed,
-}
 
 /// The two ordered pending-message lists owned by an agent.
 #[derive(Debug, Default)]
@@ -70,7 +32,7 @@ struct Inbox {
 pub struct Agent {
     pub id: SessionId,
     pub options: AgentOptions,
-    pub session: Arc<Session>,
+    pub session: Arc<dyn SessionView>,
     /// Agent-scoped context.
     pub ctx: Context,
     status: Mutex<AgentStatus>,
@@ -81,6 +43,8 @@ pub struct Agent {
     wake_rx: tokio::sync::watch::Receiver<u64>,
     /// True while the driver is processing a batch.
     driver_busy: Arc<AtomicBool>,
+    /// Number of pending (unclaimed) inbox messages.
+    pending: Arc<AtomicUsize>,
     /// Bumped whenever the driver settles back to waiting.
     settle_tx: tokio::sync::watch::Sender<u64>,
     settle_rx: tokio::sync::watch::Receiver<u64>,
@@ -94,7 +58,7 @@ impl Agent {
     pub fn new(
         id: SessionId,
         options: AgentOptions,
-        session: Arc<Session>,
+        session: Arc<dyn SessionView>,
         ctx: Context,
     ) -> Arc<Agent> {
         let (wake_tx, wake_rx) = tokio::sync::watch::channel(0);
@@ -110,6 +74,7 @@ impl Agent {
             wake_tx,
             wake_rx,
             driver_busy: Arc::new(AtomicBool::new(false)),
+            pending: Arc::new(AtomicUsize::new(0)),
             settle_tx,
             settle_rx,
             disposed: Arc::new(AtomicBool::new(false)),
@@ -129,18 +94,21 @@ impl Agent {
     /// Queue an ordinary follow-up turn and wake the driver.
     pub fn followup(&self, message: Message) {
         self.inbox.lock().unwrap().next_turn.push_back(message);
+        self.pending.fetch_add(1, Ordering::SeqCst);
         self.wake();
     }
 
     /// Submit steering for the nearest step (does not open a new turn).
     pub fn steer(&self, message: Message) {
         self.inbox.lock().unwrap().next_step.push_back(message);
+        self.pending.fetch_add(1, Ordering::SeqCst);
         self.wake();
     }
 
     /// Queue model-facing context without waking the driver.
     pub fn inject(&self, message: Message) {
         self.inbox.lock().unwrap().next_step.push_back(message);
+        self.pending.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Bump the wake channel so the driver re-checks its inbox.
@@ -183,8 +151,7 @@ impl Agent {
     }
 
     pub(crate) fn has_work(&self) -> bool {
-        let inbox = self.inbox.lock().unwrap();
-        !inbox.next_turn.is_empty() || !inbox.next_step.is_empty()
+        self.pending.load(Ordering::SeqCst) > 0
     }
 
     /// Claim one turn-opening batch: one `next-turn` message plus all
@@ -196,13 +163,16 @@ impl Agent {
             batch.push(message);
         }
         batch.extend(inbox.next_step.drain(..));
+        self.pending.store(0, Ordering::SeqCst);
         batch
     }
 
     /// Claim only the `next-step` input (a step continuation).
     pub(crate) fn claim_next_step(&self) -> Vec<Message> {
         let mut inbox = self.inbox.lock().unwrap();
-        inbox.next_step.drain(..).collect()
+        let drained: Vec<Message> = inbox.next_step.drain(..).collect();
+        self.pending.store(0, Ordering::SeqCst);
+        drained
     }
 
     pub(crate) fn begin_turn(&self, token: CancelToken) {
@@ -231,26 +201,20 @@ impl Agent {
     }
 
     fn emit_status(&self) {
-        self.ctx.emit(
-            "agent/status",
-            json!({ "agent": self.id, "status": self.status().as_str_name() }),
+        dsh_api::events::emit(
+            &self.ctx,
+            &dsh_api::events::AgentStatusPayload {
+                agent: self.id.clone(),
+                status: self.status().as_str_name().to_string(),
+            },
         );
-    }
-}
-
-impl AgentStatus {
-    pub fn as_str_name(self) -> &'static str {
-        match self {
-            AgentStatus::Idle => "idle",
-            AgentStatus::Running => "running",
-        }
     }
 }
 
 struct AgentRegistryInner {
     agents: Mutex<std::collections::HashMap<SessionId, Arc<Agent>>>,
     ctx: Context,
-    sessions: SessionStore,
+    sessions: SessionService,
 }
 
 /// Live agent registry (`ctx.agents`). Cheap-clone handle.
@@ -260,7 +224,7 @@ pub struct AgentRegistry {
 }
 
 impl AgentRegistry {
-    pub fn new(ctx: Context, sessions: SessionStore) -> Self {
+    pub fn new(ctx: Context, sessions: SessionService) -> Self {
         AgentRegistry {
             inner: Arc::new(AgentRegistryInner {
                 agents: Mutex::new(std::collections::HashMap::new()),
@@ -283,7 +247,7 @@ impl AgentRegistry {
             cwd: cwd.clone(),
             ..Default::default()
         });
-        let agent_id = session.id.clone();
+        let agent_id = session.id().to_string();
         let agent = Agent::new(agent_id.clone(), options.clone(), session, self.inner.ctx.clone());
 
         if let Some(seed) = seed_prompt {
@@ -299,7 +263,10 @@ impl AgentRegistry {
             }
             map.insert(agent_id.clone(), agent.clone());
         }
-        self.inner.ctx.emit("agent/created", json!({ "agent": agent_id }));
+        dsh_api::events::emit(
+            &self.inner.ctx,
+            &dsh_api::events::AgentCreatedPayload { agent: agent_id },
+        );
         crate::loop_driver::spawn_driver(agent.clone());
         Ok(agent)
     }
@@ -319,7 +286,12 @@ impl AgentRegistry {
         agent.wake();
         let removed = self.inner.agents.lock().unwrap().remove(&agent.id).is_some();
         if removed {
-            self.inner.ctx.emit("agent/disposed", json!({ "agent": agent.id }));
+            dsh_api::events::emit(
+                &self.inner.ctx,
+                &dsh_api::events::AgentDisposedPayload {
+                    agent: agent.id.clone(),
+                },
+            );
         }
     }
 
@@ -340,5 +312,88 @@ pub fn user_message_with_text(id: impl Into<String>, text: impl Into<String>) ->
         role: Role::User,
         content: vec![dsh_llm::ContentBlock::text(text)],
         source: MessageSource::User,
+    }
+}
+
+impl dsh_api::services::AgentView for Agent {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn session(&self) -> Arc<dyn dsh_api::services::SessionView> {
+        self.session.clone()
+    }
+
+    fn followup(&self, message: Message) {
+        Agent::followup(self, message)
+    }
+
+    fn steer(&self, message: Message) {
+        Agent::steer(self, message)
+    }
+
+    fn inject(&self, message: Message) {
+        Agent::inject(self, message)
+    }
+
+    fn cancel(&self, cause: dsh_types::AgentCancelCause, keep_inbox: bool) {
+        Agent::cancel(self, cause, keep_inbox)
+    }
+
+    fn status(&self) -> dsh_types::AgentStatus {
+        Agent::status(self)
+    }
+
+    fn driver_busy(&self) -> bool {
+        Agent::driver_busy(self)
+    }
+
+    fn when_idle(&self) -> dsh_api::services::BoxFuture<()> {
+        let mut rx = self.settle_rx.clone();
+        let busy = self.driver_busy.clone();
+        let pending = self.pending.clone();
+        Box::pin(async move {
+            loop {
+                if !busy.load(Ordering::SeqCst) && pending.load(Ordering::SeqCst) == 0 {
+                    return;
+                }
+                let _version = *rx.borrow_and_update();
+                if rx.changed().await.is_err() {
+                    return;
+                }
+            }
+        })
+    }
+}
+
+impl dsh_api::services::AgentRegistryApi for AgentRegistry {
+    fn create(
+        &self,
+        id: Option<String>,
+        options: AgentOptions,
+        cwd: Option<String>,
+        seed_prompt: Option<String>,
+    ) -> Result<Arc<dyn dsh_api::services::AgentView>, String> {
+        self.create(id, options, cwd, seed_prompt)
+            .map(|a| a as Arc<dyn dsh_api::services::AgentView>)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get(&self, id: &str) -> Option<Arc<dyn dsh_api::services::AgentView>> {
+        self.get(id)
+            .map(|a| a as Arc<dyn dsh_api::services::AgentView>)
+    }
+
+    fn list(&self) -> Vec<Arc<dyn dsh_api::services::AgentView>> {
+        self.list()
+            .into_iter()
+            .map(|a| a as Arc<dyn dsh_api::services::AgentView>)
+            .collect()
+    }
+
+    fn dispose(&self, agent: &Arc<dyn dsh_api::services::AgentView>) {
+        if let Some(concrete) = self.get(agent.id()) {
+            self.dispose(&concrete);
+        }
     }
 }

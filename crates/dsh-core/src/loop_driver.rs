@@ -23,14 +23,15 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
+use dsh_api::services::{LlmService, SessionView, ToolsService};
 use dsh_llm::{
-    BlockAssembler, CancelToken, ContentBlock, GenerateOptions, LlmCallConfig, LlmRuntime,
-    Message, MessageSource, Role, StreamChunk, StreamTable, stream_via_waterfall,
+    BlockAssembler, CancelToken, ContentBlock, GenerateOptions, LlmCallConfig, Message,
+    MessageSource, Role, StreamChunk, StreamTable, stream_via_waterfall,
 };
 use dsh_session::{
     EpochHeader, SessionEventData, TurnEndReason,
 };
-use dsh_tools::{ToolExecutionResult, ToolRegistry, ToolRunContext};
+use dsh_tools::{ToolExecutionResult, ToolRunContext};
 
 use crate::agent::Agent;
 
@@ -64,9 +65,12 @@ async fn drive(agent: Arc<Agent>) {
                 break;
             }
             if let Err(err) = run_turn(&agent, claimed).await {
-                agent.ctx.emit(
-                    "agent/error",
-                    json!({ "agent": agent.id, "error": err.to_string() }),
+                dsh_api::events::emit(
+                    &agent.ctx,
+                    &dsh_api::events::AgentErrorPayload {
+                        agent: agent.id.clone(),
+                        error: err.to_string(),
+                    },
                 );
             }
             if agent.is_disposed() {
@@ -77,27 +81,27 @@ async fn drive(agent: Arc<Agent>) {
     }
 }
 
-fn services(agent: &Agent) -> (LlmRuntime, StreamTable, ToolRegistry) {
+fn services(agent: &Agent) -> (LlmService, StreamTable, ToolsService) {
     let llm = agent
         .ctx
-        .get::<LlmRuntime>("llm")
+        .get::<LlmService>(dsh_api::LLM_SERVICE)
         .expect("llm service present while agent loop is active");
     let streams = agent
         .ctx
-        .get::<StreamTable>("llmStreams")
+        .get::<StreamTable>(dsh_api::LLM_STREAMS_SERVICE)
         .expect("llmStreams service present while agent loop is active");
     let tools = agent
         .ctx
-        .get::<ToolRegistry>("tools")
+        .get::<ToolsService>(dsh_api::TOOLS_SERVICE)
         .expect("tools service present while agent loop is active");
     ((*llm).clone(), (*streams).clone(), (*tools).clone())
 }
 
 async fn run_turn(agent: &Arc<Agent>, claimed: Vec<Message>) -> Result<(), crate::AgentError> {
-    let session = &agent.session;
+    let session = &agent.session; // Arc<dyn SessionView>
     let (llm, streams, tools) = services(agent);
 
-    let turn = next_turn_number(session)?;
+    let turn = next_turn_number(&**session)?;
     session.append(SessionEventData::TurnStart { turn });
 
     // agent/pre-step waterfall: listeners may reject or rewrite the batch.
@@ -153,7 +157,7 @@ async fn run_turn(agent: &Arc<Agent>, claimed: Vec<Message>) -> Result<(), crate
     let config = resolve_config(agent, turn).await?;
     let prompt = agent
         .ctx
-        .get::<crate::prompt::SystemPromptService>("systemPrompt")
+        .get::<dsh_api::services::SystemPromptService>(dsh_api::SYSTEM_PROMPT_SERVICE)
         .map(|p| p.assemble())
         .unwrap_or_default();
 
@@ -316,7 +320,7 @@ async fn run_turn(agent: &Arc<Agent>, claimed: Vec<Message>) -> Result<(), crate
                 ctx: agent.ctx.clone(),
                 signal: agent.turn_token().unwrap_or_default(),
                 agent_id: Some(agent.id.clone()),
-                cwd: agent.session.header.cwd.clone(),
+                cwd: agent.session.header_cwd(),
             };
             let result = tools
                 .execute(id.clone(), name.clone(), parsed_args, run_ctx)
@@ -358,7 +362,7 @@ async fn run_turn(agent: &Arc<Agent>, claimed: Vec<Message>) -> Result<(), crate
 }
 
 /// The next turn number: one past the last logged `turn/start`.
-fn next_turn_number(session: &dsh_session::Session) -> Result<u64, crate::AgentError> {
+fn next_turn_number(session: &dyn SessionView) -> Result<u64, crate::AgentError> {
     let mut max = 0u64;
     for event in session.events() {
         if let SessionEventData::TurnStart { turn } = event.data {

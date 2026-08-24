@@ -2,12 +2,9 @@ use std::sync::Arc;
 
 use cordis::plugin::BoxFuture;
 use cordis::Context;
-use dsh_core::{
-    AgentOptions, AgentRegistry, PromptSection, SystemPromptService, agent_loop_plugin,
-    prompt::system_prompt_plugin,
-};
+use dsh_core::{AgentOptions, PromptSection, SystemPromptService, agent_loop_plugin, prompt::system_prompt_plugin};
 use dsh_core::agent::user_message_with_text;
-use dsh_llm::{ContentBlock, GenerateOptions, LlmAdapter, LlmError, LlmRuntime, StreamChunk, llm_plugin, runtime::stream_from_chunks};
+use dsh_llm::{ContentBlock, GenerateOptions, LlmAdapter, LlmError, StreamChunk, llm_plugin, runtime::stream_from_chunks};
 use dsh_session::{SessionEventData, TurnEndReason, session_plugin};
 use dsh_tools::tools_plugin;
 use serde_json::{json, Value};
@@ -57,7 +54,7 @@ async fn agent_loop_runs_tool_then_finishes() {
     compose(&ctx).await;
 
     // Script the mock adapter: first a bash tool call, then the final answer.
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -73,7 +70,7 @@ async fn agent_loop_runs_tool_then_finishes() {
         )
         .unwrap();
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
@@ -81,7 +78,7 @@ async fn agent_loop_runs_tool_then_finishes() {
     agent.followup(user_message_with_text("u-1", "list the files please"));
     agent.when_idle().await;
 
-    let events = agent.session.events();
+    let events = agent.session().events();
     let types: Vec<&str> = events.iter().map(|e| e.event_type()).collect();
     assert!(types.contains(&"turn/start"));
     assert!(types.contains(&"user/message"));
@@ -105,7 +102,7 @@ async fn agent_loop_runs_tool_then_finishes() {
     }
 
     // The final assistant message carries the model's answer.
-    let messages = agent.session.derive_messages();
+    let messages = agent.session().derive_messages();
     let last = messages.last().unwrap();
     assert_eq!(last.text(), "task complete");
 
@@ -137,7 +134,7 @@ async fn agent_loop_uses_system_prompt_and_tool_schemas() {
     let seen: Arc<std::sync::Mutex<Vec<GenerateOptions>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen_for_adapter = seen.clone();
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -150,11 +147,11 @@ async fn agent_loop_uses_system_prompt_and_tool_schemas() {
         .unwrap();
 
     // Add a prompt section and a variable.
-    let prompt = ctx.require::<SystemPromptService>("systemPrompt").unwrap();
-    prompt.section(PromptSection::new("persona", 0, "You are {{who}}, an agent."));
-    prompt.variable("who", || Some("dsh-rs".to_string()));
+    let prompt = ctx.require::<dsh_api::services::SystemPromptService>("systemPrompt").unwrap();
+    prompt.section("persona", 0, "You are {{who}}, an agent.", false);
+    prompt.variable("who", std::sync::Arc::new(|| Some("dsh-rs".to_string())));
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
@@ -225,7 +222,7 @@ async fn cancel_aborts_the_turn() {
     let ctx = Context::new();
     compose(&ctx).await;
 
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -236,7 +233,7 @@ async fn cancel_aborts_the_turn() {
         )
         .unwrap();
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
@@ -250,7 +247,7 @@ async fn cancel_aborts_the_turn() {
     agent.cancel(dsh_core::AgentCancelCause::User, false);
     agent.when_idle().await;
 
-    let events = agent.session.events();
+    let events = agent.session().events();
     let ends: Vec<_> = events
         .iter()
         .filter(|e| matches!(e.data, SessionEventData::TurnEnd { .. }))
@@ -269,7 +266,7 @@ async fn todo_tool_writes_session_event() {
     let ctx = Context::new();
     compose(&ctx).await;
 
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -290,14 +287,14 @@ async fn todo_tool_writes_session_event() {
         )
         .unwrap();
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
     agent.followup(user_message_with_text("u-1", "track my todos"));
     agent.when_idle().await;
 
-    let events = agent.session.events();
+    let events = agent.session().events();
     let todos: Vec<_> = events
         .iter()
         .filter_map(|e| match &e.data {
@@ -315,12 +312,12 @@ async fn todo_tool_writes_session_event() {
 async fn agents_registry_tracks_live_agents() {
     let ctx = Context::new();
     compose(&ctx).await;
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let a = agents
         .create(Some("agent-x".into()), AgentOptions::mock("mock-1"), None, None)
         .unwrap();
-    assert_eq!(a.id, "agent-x");
-    assert_eq!(agents.get("agent-x").unwrap().id, "agent-x");
+    assert_eq!(a.id(), "agent-x");
+    assert_eq!(agents.get("agent-x").unwrap().id(), "agent-x");
     assert_eq!(agents.list().len(), 1);
     agents.dispose(&a);
     assert!(agents.get("agent-x").is_none());
@@ -330,7 +327,7 @@ async fn agents_registry_tracks_live_agents() {
 async fn seed_prompt_enters_the_log() {
     let ctx = Context::new();
     compose(&ctx).await;
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<dsh_api::services::AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(
             None,
@@ -341,7 +338,7 @@ async fn seed_prompt_enters_the_log() {
         .unwrap();
     agent.followup(user_message_with_text("u-1", "go"));
     agent.when_idle().await;
-    let events = agent.session.events();
+    let events = agent.session().events();
     let users: Vec<_> = events
         .iter()
         .filter_map(|e| match &e.data {

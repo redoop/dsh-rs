@@ -64,9 +64,95 @@ impl BaseConfig {
     }
 }
 
+/// The declarative service contract of one plugin.
+pub use dsh_api::manifest::{ManifestApi, ManifestRegistry, PluginManifest};
+
+/// The manifest plugin: provides `ctx.manifest`, the contract registry.
+pub fn manifest_plugin() -> Arc<dyn Plugin> {
+    cordis::plugin::plugin("manifest", |ctx, _config: Value| async move {
+        let registry = Arc::new(ManifestRegistry::new());
+        let api: Arc<dyn dsh_api::manifest::ManifestApi> = registry.clone();
+        ctx.provide(
+            dsh_api::MANIFEST_SERVICE,
+            dsh_api::services::ManifestService::new(api),
+        )
+        .await?;
+        Ok(())
+    })
+}
+
+/// Register every bundle plugin's manifest on the manifest service. This is
+/// the declarative contract (`--dump-config` / coverage validation):
+/// what each plugin provides, requires, and which tools it registers.
+pub fn register_manifests(ctx: &Context) {
+    let Some(manifest) = ctx.get::<dsh_api::services::ManifestService>(dsh_api::MANIFEST_SERVICE)
+    else {
+        return;
+    };
+    manifest.register(
+        PluginManifest::new("llm")
+            .describe("model adapters and the LLM adapter seam")
+            .provides(dsh_api::LLM_SERVICE, "provider routing and streaming (ctx.llm)")
+            .provides(dsh_api::LLM_STREAMS_SERVICE, "in-process stream handles"),
+    );
+    manifest.register(
+        PluginManifest::new("sessions")
+            .describe("event-sourced session log and store")
+            .provides(dsh_api::SESSIONS_SERVICE, "session create/get/list/fork/flush"),
+    );
+    manifest.register(
+        PluginManifest::new("session-persistence")
+            .describe("JSONL durability backend")
+            .provides(dsh_api::SESSION_PERSISTENCE_SERVICE, "JSONL backend")
+            .requires(dsh_api::SESSIONS_SERVICE),
+    );
+    manifest.register(
+        PluginManifest::new("tools")
+            .describe("scoped tool registry and guarded execution pipeline")
+            .provides(dsh_api::TOOLS_SERVICE, "tool registry (ctx.tools)")
+            .tools(vec![
+                dsh_types::ToolSchema {
+                    name: "bash".into(),
+                    description: "Run a shell command".into(),
+                    parameters: json!({"type": "object"}),
+                },
+                dsh_types::ToolSchema {
+                    name: "todo_write".into(),
+                    description: "Replace the agent todo list".into(),
+                    parameters: json!({"type": "object"}),
+                },
+            ]),
+    );
+    manifest.register(
+        PluginManifest::new("system-prompt")
+            .describe("prompt-section and variable assembly")
+            .provides(
+                dsh_api::SYSTEM_PROMPT_SERVICE,
+                "system-prompt assembly (ctx.systemPrompt)",
+            ),
+    );
+    manifest.register(
+        PluginManifest::new("agent-loop")
+            .describe("the default agent driver")
+            .provides(dsh_api::AGENTS_SERVICE, "agent registry (ctx.agents)")
+            .requires(dsh_api::SESSIONS_SERVICE)
+            .requires(dsh_api::SYSTEM_PROMPT_SERVICE)
+            .requires(dsh_api::TOOLS_SERVICE)
+            .requires(dsh_api::LLM_SERVICE)
+            .requires(dsh_api::LLM_STREAMS_SERVICE),
+    );
+}
+
 /// Start the base bundle on `ctx` and wait for every fiber to converge.
 pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<FiberHandle>, String> {
     let mut entries: Vec<BundleEntry> = Vec::new();
+
+    // 0. The manifest registry (contract layer) is always present.
+    // entries.push(BundleEntry {
+    //     name: "manifest",
+    //     plugin: manifest_plugin(),
+    //     config: None,
+    // });
 
     // 1. LLM seam: the mock adapter is always registered; openai optional.
     let mut llm_config = json!({});
@@ -115,11 +201,17 @@ pub async fn install_base(ctx: &Context, config: BaseConfig) -> Result<Vec<Fiber
 
     // Wait for convergence; surface the first failure.
     for handle in &handles {
+        eprintln!("[bundle] joining {}", handle.name());
         handle
             .join()
             .await
             .map_err(|err| format!("bundle plugin {} failed to start: {err}", handle.name()))?;
+        eprintln!("[bundle] joined {}", handle.name());
     }
+
+    // Declare every plugin's contract on the manifest registry.
+    // register_manifests(ctx);
+
     Ok(handles)
 }
 

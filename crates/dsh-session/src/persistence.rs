@@ -165,7 +165,7 @@ pub fn jsonl_persistence_plugin(dir: PathBuf) -> Arc<dyn Plugin> {
             let dir = dir.clone();
             async move {
                 let store = ctx
-                    .get::<crate::store::SessionStore>(SESSIONS_SERVICE)
+                    .get::<dsh_api::services::SessionService>(SESSIONS_SERVICE)
                     .ok_or_else(|| cordis::Error::msg("sessions service missing"))?;
                 let backend = Arc::new(JsonlPersistence::new(dir));
                 store.attach_persistence(backend.clone());
@@ -186,4 +186,22 @@ pub fn temp_dir(tag: &str) -> PathBuf {
 /// Ensure a directory exists.
 pub fn ensure_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)
+}
+
+impl dsh_api::services::SessionPersistenceApi for JsonlPersistence {
+    fn on_event(&self, session: &str, event: &dsh_types::SessionEvent) {
+        SessionPersistence::on_event(self, &session.to_string(), event)
+    }
+
+    fn flush(&self, session: &str) -> std::io::Result<()> {
+        SessionPersistence::flush(self, &session.to_string())
+    }
+
+    fn load(&self, session: &str) -> std::io::Result<Vec<dsh_types::SessionEvent>> {
+        SessionPersistence::load(self, &session.to_string())
+    }
+
+    fn list(&self) -> Vec<String> {
+        SessionPersistence::list(self)
+    }
 }

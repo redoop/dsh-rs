@@ -22,7 +22,7 @@ use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use ratatui::{Frame, Terminal};
 use unicode_width::UnicodeWidthStr;
 
-use dsh_core::Agent;
+use dsh_api::services::AgentView;
 use dsh_llm::ContentBlock;
 use dsh_session::{SessionEvent, SessionEventData};
 use unicode_segmentation::UnicodeSegmentation;
@@ -156,18 +156,14 @@ pub async fn attach_listener(
     session_id: String,
     state: Arc<Mutex<ChatState>>,
 ) -> Result<cordis::fiber::EffectGuard, cordis::Error> {
-    ctx.on("session/event", move |_ctx, payload, _next| {
+    dsh_api::events::on::<dsh_api::events::SessionEventPayload, _>(ctx, move |_ctx, payload| {
         let state = state.clone();
         let session_id = session_id.clone();
         Box::pin(async move {
-            let seen = payload.get("session").and_then(|s| s.as_str()).unwrap_or("");
-            if seen != session_id {
+            if payload.session != session_id {
                 return Ok(serde_json::Value::Null);
             }
-            let event = payload.get("event").cloned().unwrap_or(serde_json::Value::Null);
-            if let Ok(event) = serde_json::from_value::<SessionEvent>(event) {
-                state.lock().unwrap().apply_event(&event);
-            }
+            state.lock().unwrap().apply_event(&payload.event);
             Ok(serde_json::Value::Null)
         })
     })
@@ -219,12 +215,12 @@ impl Default for ChatTui {
 
 /// Run the chat TUI until the user quits. Enters raw mode + alternate screen;
 /// restores the terminal before returning.
-pub async fn run_chat(ctx: &Context, agent: &Arc<Agent>) -> Result<(), String> {
+pub async fn run_chat(ctx: &Context, agent: &Arc<dyn AgentView>) -> Result<(), String> {
     let state = Arc::new(Mutex::new(ChatState {
-        session_id: Some(agent.id.clone()),
+        session_id: Some(agent.id().to_string()),
         ..Default::default()
     }));
-    attach_listener(ctx, agent.id.clone(), state.clone()).await.map_err(|e| e.to_string())?;
+    attach_listener(ctx, agent.id().to_string(), state.clone()).await.map_err(|e| e.to_string())?;
 
     let mut terminal = ratatui::init();
     let mut tui = ChatTui::default();
@@ -325,7 +321,7 @@ impl ChatTui {
     fn event_loop(
         &mut self,
         terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
-        agent: &Arc<Agent>,
+        agent: &Arc<dyn AgentView>,
         state: Arc<Mutex<ChatState>>,
     ) -> io::Result<()> {
         loop {
@@ -388,7 +384,7 @@ impl ChatTui {
     pub fn draw(
         &mut self,
         frame: &mut Frame,
-        agent: &Arc<Agent>,
+        agent: &Arc<dyn AgentView>,
         state: &Mutex<ChatState>,
     ) {
         let area = frame.area();
@@ -528,7 +524,7 @@ impl ChatTui {
     /// IME-friendly rules: quitting is only possible via Ctrl-C / Ctrl-Q — a
     /// bare `q` must never quit, because a Chinese/Japanese IME commits `q`
     /// (e.g. 拼音 "请/去") as an ordinary character.
-    pub fn handle_key(&mut self, key: ratatui::crossterm::event::KeyEvent, agent: &Arc<Agent>) -> io::Result<bool> {
+    pub fn handle_key(&mut self, key: ratatui::crossterm::event::KeyEvent, agent: &Arc<dyn AgentView>) -> io::Result<bool> {
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Ok(true),
             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => Ok(true),

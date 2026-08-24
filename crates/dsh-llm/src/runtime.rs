@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use cordis::plugin::{plugin, BoxFuture, Plugin};
+pub use dsh_api::services::LlmAdapterApi as LlmAdapter;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -21,21 +22,6 @@ use crate::types::{
 
 /// A boxed async stream of chunks.
 pub type BoxStream<T> = Pin<Box<dyn futures::Stream<Item = T> + Send>>;
-
-/// Provider-wire adapter for the harness message and stream vocabulary.
-pub trait LlmAdapter: Send + Sync + 'static {
-    /// Display name of the adapter implementation.
-    fn name(&self) -> &'static str;
-
-    /// Answer one fully assembled request with a raw chunk stream.
-    ///
-    /// Transport/protocol failures return `Err(LlmError)`; provider in-band
-    /// failures end the stream with a `Finish::Error` chunk.
-    fn stream(
-        &self,
-        options: GenerateOptions,
-    ) -> BoxFuture<Result<BoxStream<StreamChunk>, LlmError>>;
-}
 
 /// Wrap an iterator (or vector) of chunks as a stream.
 pub fn stream_from_chunks(chunks: Vec<StreamChunk>) -> BoxStream<StreamChunk> {
@@ -190,8 +176,9 @@ pub fn llm_plugin() -> Arc<dyn Plugin> {
     plugin("llm", |ctx, config: Value| async move {
         let runtime = LlmRuntime::new();
         let streams = StreamTable::new();
-        ctx.provide("llm", runtime.clone()).await?;
-        ctx.provide("llmStreams", streams.clone()).await?;
+        let api: Arc<dyn dsh_api::services::LlmRuntimeApi> = Arc::new(runtime.clone());
+        ctx.provide(dsh_api::LLM_SERVICE, dsh_api::services::LlmService::new(api)).await?;
+        ctx.provide(dsh_api::LLM_STREAMS_SERVICE, streams.clone()).await?;
 
         // Adapters from config: { "mock": { "providers": [...] }, "openai": { ... } }
         let adapters = config.get("adapters").cloned().unwrap_or(Value::Null);
@@ -231,7 +218,7 @@ pub fn llm_plugin() -> Arc<dyn Plugin> {
 /// Returns `Err` when no listener/fallback produced a `stream_id`.
 pub async fn stream_via_waterfall(
     ctx: &cordis::Context,
-    runtime: LlmRuntime,
+    runtime: dsh_api::services::LlmService,
     streams: StreamTable,
     options: GenerateOptions,
 ) -> Result<BoxStream<StreamChunk>, LlmError> {
@@ -276,8 +263,32 @@ pub async fn stream_via_waterfall(
     }
 }
 
-impl From<crate::types::LlmError> for cordis::Error {
-    fn from(err: crate::types::LlmError) -> Self {
-        cordis::Error::msg(err.to_string())
+
+impl dsh_api::services::LlmRuntimeApi for LlmRuntime {
+    fn list_providers(&self) -> Vec<LlmProviderInfo> {
+        self.list_providers()
+    }
+
+    fn has_provider(&self, name: &str) -> bool {
+        self.has_provider(name)
+    }
+
+    fn register_adapter(
+        &self,
+        providers: &[&str],
+        adapter: Arc<dyn dsh_api::services::LlmAdapterApi>,
+    ) -> Result<(), LlmError> {
+        self.register_adapter(providers, adapter)
+    }
+
+    fn unregister_adapter(&self, providers: &[&str]) {
+        self.unregister_adapter(providers)
+    }
+
+    fn stream(
+        &self,
+        options: GenerateOptions,
+    ) -> BoxFuture<Result<BoxStream<StreamChunk>, LlmError>> {
+        self.stream(options)
     }
 }

@@ -265,11 +265,11 @@ impl Plugin for DynamicPlugin {
                 return Err(cordis::Error::msg("dynamic plugin setup failed"));
             }
 
-            // Register every declared tool on ctx.tools as a fiber EFFECT, so
-            // unloading the plugin unregisters them automatically. Each
-            // tool's execute body calls back into the library
+            // Register every declared tool through the (interface) tool
+            // registry as a fiber EFFECT, so unloading unregisters them
+            // automatically. Each tool's exec calls back into the library
             // (spawn_blocking: FFI is sync).
-            let registry = ctx.get::<dsh_tools::ToolRegistry>("tools");
+            let registry = ctx.get::<dsh_api::services::ToolsService>("tools");
             let exports_for_teardown = exports.clone();
             let tools_count = tools.len();
             ctx.effect("dynamic plugin tools", async move {
@@ -279,55 +279,55 @@ impl Plugin for DynamicPlugin {
                 if let Some(registry) = &registry {
                     for tool in &tools {
                         let exports = exports.clone();
-                        let tool = tool.clone();
-                        let definition = dsh_tools::ToolDefinition::new(
-                            tool.name.clone(),
-                            tool.description.clone(),
-                            tool.parameters.clone(),
-                            move |args: dsh_tools::ToolCallArgs,
-                                  _run_ctx: dsh_tools::ToolRunContext| {
-                                let exports = exports.clone();
-                                let handle = handle;
-                                let exec_id = tool.exec_id.clone();
-                                let arguments = args.arguments.clone();
-                                Box::pin(async move {
-                                    tokio::task::spawn_blocking(move || {
-                                        let mut buf = vec![0u8; 64 * 1024];
-                                        let args_json = serde_json::to_string(&arguments)
-                                            .unwrap_or_else(|_| "null".to_string());
-                                        exports
-                                            .invoke_sync(handle, &exec_id, &args_json, &mut buf)
-                                    })
-                                    .await
-                                    .map_err(|e| {
-                                        dsh_tools::ToolExecutionResult::error(
-                                            "PLUGIN_JOIN",
-                                            e.to_string(),
-                                        )
-                                    })
-                                    .and_then(|result| {
-                                        result.map_err(|e| {
+                        let exec_id = tool.exec_id.clone();
+                        let spec = dsh_api::services::DynamicToolSpec {
+                            name: tool.name.clone(),
+                            description: tool.description.clone(),
+                            parameters: tool.parameters.clone(),
+                            exec: std::sync::Arc::new(
+                                move |arguments: Value| {
+                                    let exports = exports.clone();
+                                    let handle = handle;
+                                    let exec_id = exec_id.clone();
+                                    Box::pin(async move {
+                                        tokio::task::spawn_blocking(move || {
+                                            let mut buf = vec![0u8; 64 * 1024];
+                                            let args_json = serde_json::to_string(&arguments)
+                                                .unwrap_or_else(|_| "null".to_string());
+                                            exports
+                                                .invoke_sync(handle, &exec_id, &args_json, &mut buf)
+                                        })
+                                        .await
+                                        .map_err(|e| {
                                             dsh_tools::ToolExecutionResult::error(
-                                                "PLUGIN_CALL",
+                                                "PLUGIN_JOIN",
                                                 e.to_string(),
                                             )
                                         })
-                                    })
-                                    .map(|json| {
-                                        serde_json::from_str::<Value>(&json)
-                                            .map(to_tool_result)
-                                            .unwrap_or_else(|e| {
+                                        .and_then(|result| {
+                                            result.map_err(|e| {
                                                 dsh_tools::ToolExecutionResult::error(
-                                                    "PLUGIN_RESULT",
+                                                    "PLUGIN_CALL",
                                                     e.to_string(),
                                                 )
                                             })
+                                        })
+                                        .map(|json| {
+                                            serde_json::from_str::<Value>(&json)
+                                                .map(to_tool_result)
+                                                .unwrap_or_else(|e| {
+                                                    dsh_tools::ToolExecutionResult::error(
+                                                        "PLUGIN_RESULT",
+                                                        e.to_string(),
+                                                    )
+                                                })
+                                        })
+                                        .unwrap_or_else(|err| err)
                                     })
-                                    .unwrap_or_else(|err| err)
-                                })
-                            },
-                        );
-                        registry.register(Arc::new(definition));
+                                },
+                            ),
+                        };
+                        registry.register_dynamic_tool(spec);
                     }
                 }
 
@@ -338,7 +338,7 @@ impl Plugin for DynamicPlugin {
                     Box::pin(async move {
                         if let Some(registry) = &registry {
                             for tool in &tools {
-                                registry.unregister(&tool.name);
+                                registry.unregister_dynamic_tool(&tool.name);
                             }
                         }
                     })

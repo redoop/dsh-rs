@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cordis::{plugin, Context, Plugin};
+use dsh_types::{PromptAssembly, VariableProvider};
 use serde_json::Value;
 
 /// The `systemPrompt` service key.
@@ -87,15 +88,6 @@ impl PromptContext {
         }
     }
 }
-
-/// The result of one assembly: the rendered system prompt.
-#[derive(Debug, Clone, Default)]
-pub struct PromptAssembly {
-    pub system: String,
-}
-
-/// A provider of a prompt variable's value at assembly time.
-pub type VariableProvider = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 struct SystemPromptInner {
     sections: Mutex<Vec<PromptSection>>,
@@ -192,7 +184,31 @@ impl SystemPromptService {
 pub fn system_prompt_plugin() -> Arc<dyn Plugin> {
     plugin("system-prompt", |ctx, _config: Value| async move {
         let service = SystemPromptService::new(ctx.clone());
-        ctx.provide(SYSTEM_PROMPT_SERVICE, service.clone()).await?;
+        let api: Arc<dyn dsh_api::services::SystemPromptApi> = Arc::new(service.clone());
+        ctx.provide(
+            dsh_api::SYSTEM_PROMPT_SERVICE,
+            dsh_api::services::SystemPromptService::new(api),
+        )
+        .await?;
         Ok(())
     })
+}
+
+impl dsh_api::services::SystemPromptApi for SystemPromptService {
+    fn section(&self, name: &str, order: i32, text: &str, complete: bool) {
+        self.section(PromptSection {
+            name: name.to_string(),
+            order,
+            text: PromptText::Static(text.to_string()),
+            complete,
+        });
+    }
+
+    fn variable(&self, name: &str, provider: dsh_types::VariableProvider) {
+        self.variable(name, move || provider());
+    }
+
+    fn assemble(&self) -> dsh_types::PromptAssembly {
+        self.assemble()
+    }
 }

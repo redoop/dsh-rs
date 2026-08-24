@@ -12,31 +12,12 @@ use cordis::{plugin, Context, Plugin};
 use serde_json::{json, Value};
 
 use crate::event::{now_ms, SessionEvent, SessionEventData, SessionHeader, SessionId};
+use dsh_types::CreateSessionOptions;
 use crate::persistence::SessionPersistence;
 use crate::session::Session;
 
 /// The `sessions` service key.
 pub const SESSIONS_SERVICE: &str = "sessions";
-
-/// Options for creating a session.
-#[derive(Debug, Clone, Default)]
-pub struct CreateSessionOptions {
-    pub id: Option<SessionId>,
-    pub cwd: Option<String>,
-    /// Seed events (replay/fork).
-    pub seed: Vec<SessionEvent>,
-    /// Parent session lineage for forks.
-    pub parent_session: Option<SessionId>,
-}
-
-impl CreateSessionOptions {
-    pub fn with_id(id: impl Into<SessionId>) -> Self {
-        CreateSessionOptions {
-            id: Some(id.into()),
-            ..Default::default()
-        }
-    }
-}
 
 struct SessionStoreInner {
     sessions: Mutex<HashMap<SessionId, Arc<Session>>>,
@@ -84,9 +65,9 @@ impl SessionStore {
             .lock()
             .unwrap()
             .insert(id.clone(), session.clone());
-        self.inner.ctx.emit(
-            "session/created",
-            json!({ "session": id, "time": now_ms() }),
+        dsh_api::events::emit(
+            &self.inner.ctx,
+            &dsh_api::events::SessionCreatedPayload { session: id.clone() },
         );
         session
     }
@@ -118,9 +99,11 @@ impl SessionStore {
 
     /// Announce a just-entered session with `session/created`.
     pub fn announce(&self, session: &Arc<Session>) {
-        self.inner.ctx.emit(
-            "session/created",
-            json!({ "session": session.id, "time": now_ms() }),
+        dsh_api::events::emit(
+            &self.inner.ctx,
+            &dsh_api::events::SessionCreatedPayload {
+                session: session.id.clone(),
+            },
         );
     }
 
@@ -129,8 +112,14 @@ impl SessionStore {
     fn make_notifier(&self, session_id: SessionId) -> Arc<dyn Fn(&SessionEvent) + Send + Sync> {
         let inner = self.inner.clone();
         Arc::new(move |event: &SessionEvent| {
-            let payload = json!({ "session": session_id, "event": event });
-            inner.ctx.emit("session/event", payload);
+            let session_id = session_id.clone();
+            dsh_api::events::emit(
+                &inner.ctx,
+                &dsh_api::events::SessionEventPayload {
+                    session: session_id.clone(),
+                    event: event.clone(),
+                },
+            );
             let backends = inner.backends.lock().unwrap().clone();
             for backend in &backends {
                 backend.on_event(&session_id, event);
@@ -152,7 +141,12 @@ impl SessionStore {
     pub fn remove(&self, id: &str) -> Option<Arc<Session>> {
         let session = self.inner.sessions.lock().unwrap().remove(id);
         if session.is_some() {
-            self.inner.ctx.emit("session/disposed", json!({ "session": id }));
+            dsh_api::events::emit(
+                &self.inner.ctx,
+                &dsh_api::events::SessionDisposedPayload {
+                    session: id.to_string(),
+                },
+            );
         }
         session
     }
@@ -226,7 +220,98 @@ impl SessionStore {
 pub fn session_plugin() -> Arc<dyn Plugin> {
     plugin("sessions", |ctx, _config: Value| async move {
         let store = SessionStore::new(ctx.clone());
-        ctx.provide(SESSIONS_SERVICE, store.clone()).await?;
+        let api: Arc<dyn dsh_api::services::SessionStoreApi> = Arc::new(store.clone());
+        ctx.provide(
+            SESSIONS_SERVICE,
+            dsh_api::services::SessionService::new(api),
+        )
+        .await?;
         Ok(())
     })
+}
+
+
+impl dsh_api::services::SessionStoreApi for SessionStore {
+    fn create(&self, options: CreateSessionOptions) -> Arc<dyn dsh_api::services::SessionView> {
+        let session = self.create(options);
+        session as Arc<dyn dsh_api::services::SessionView>
+    }
+
+    fn get(&self, id: &str) -> Option<Arc<dyn dsh_api::services::SessionView>> {
+        self.get(id).map(|s| s as Arc<dyn dsh_api::services::SessionView>)
+    }
+
+    fn list(&self) -> Vec<Arc<dyn dsh_api::services::SessionView>> {
+        self.list()
+            .into_iter()
+            .map(|s| s as Arc<dyn dsh_api::services::SessionView>)
+            .collect()
+    }
+
+    fn remove(&self, id: &str) -> Option<Arc<dyn dsh_api::services::SessionView>> {
+        self.remove(id)
+            .map(|s| s as Arc<dyn dsh_api::services::SessionView>)
+    }
+
+    fn fork(
+        &self,
+        source_id: &str,
+        boundary: Option<u64>,
+        child_id: Option<String>,
+    ) -> Result<Arc<dyn dsh_api::services::SessionView>, String> {
+        let source = self
+            .inner
+            .sessions
+            .lock()
+            .unwrap()
+            .get(source_id)
+            .cloned()
+            .ok_or_else(|| format!("no live session {source_id}"))?;
+        self.fork(&source, boundary, child_id)
+            .map(|s| s as Arc<dyn dsh_api::services::SessionView>)
+            .map_err(|e| e.to_string())
+    }
+
+    fn flush(&self, session_id: &str) -> dsh_api::services::BoxFuture<Result<(), String>> {
+        let store = self.clone();
+        let session_id = session_id.to_string();
+        Box::pin(async move {
+            let Some(session) = store.get(&session_id) else {
+                return Err(format!("no live session {session_id}"));
+            };
+            store.flush(&session).await.map_err(|e| e.to_string())
+        })
+    }
+
+    fn attach_persistence(
+        &self,
+        backend: Arc<dyn dsh_api::services::SessionPersistenceApi>,
+    ) {
+        self.inner
+            .backends
+            .lock()
+            .unwrap()
+            .push(Arc::new(BackendAdapter(backend)));
+    }
+}
+
+/// Adapts the API persistence trait to the concrete backend list.
+struct BackendAdapter(Arc<dyn dsh_api::services::SessionPersistenceApi>);
+
+impl crate::persistence::SessionPersistence for BackendAdapter {
+    fn on_event(&self, session: &SessionId, event: &SessionEvent) {
+        self.0.on_event(session, event);
+    }
+
+    fn flush(&self, session: &SessionId) -> std::io::Result<()> {
+        self.0.flush(session)
+    }
+
+    fn load(&self, session: &SessionId) -> std::io::Result<Vec<SessionEvent>> {
+        self.0.load(session)
+    }
+
+    fn list(&self) -> Vec<SessionId> {
+        self.0.list()
+    }
 }

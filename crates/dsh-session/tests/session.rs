@@ -197,12 +197,12 @@ async fn session_plugin_provides_store() {
     let ctx = cordis::Context::new();
     let handle = ctx.plugin(session_plugin(), None);
     handle.join().await.unwrap();
-    let store = ctx.require::<SessionStore>("sessions").unwrap();
+    let store = ctx.require::<dsh_api::services::SessionService>("sessions").unwrap();
     let session = store.create(CreateSessionOptions {
         id: Some("plugged".into()),
         ..Default::default()
     });
-    assert_eq!(store.get("plugged").unwrap().id, session.id);
+    assert_eq!(store.get("plugged").unwrap().id(), session.id());
     assert_eq!(store.list().len(), 1);
 }
 
@@ -215,7 +215,7 @@ async fn jsonl_plugin_attaches_to_store() {
     sessions.join().await.unwrap();
     pers.join().await.unwrap();
 
-    let store = ctx.require::<SessionStore>("sessions").unwrap();
+    let store = ctx.require::<dsh_api::services::SessionService>("sessions").unwrap();
     let session = store.create(CreateSessionOptions {
         id: Some("plugged-persist".into()),
         ..Default::default()
@@ -223,7 +223,7 @@ async fn jsonl_plugin_attaches_to_store() {
     session.append(SessionEventData::UserMessage {
         message: user_message("u-1", "through the plugin"),
     });
-    store.flush(&session).await.unwrap();
+    store.flush(session.id()).await.unwrap();
 
     let handle = ctx.require::<dsh_session::persistence::PersistenceService>("sessionPersistence").unwrap();
     let loaded = handle.backend.load(&"plugged-persist".to_string()).unwrap();

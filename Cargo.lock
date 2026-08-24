@@ -199,15 +199,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsh-api"
+version = "0.1.0"
+dependencies = [
+ "cordis",
+ "dsh-types",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "dsh-bundle"
 version = "0.1.0"
 dependencies = [
  "cordis",
+ "dsh-api",
  "dsh-core",
  "dsh-llm",
  "dsh-plugin-contract",
  "dsh-session",
  "dsh-tools",
+ "dsh-types",
  "futures",
  "libloading",
  "serde",
@@ -221,6 +236,7 @@ name = "dsh-cli"
 version = "0.1.0"
 dependencies = [
  "cordis",
+ "dsh-api",
  "dsh-bundle",
  "dsh-core",
  "dsh-llm",
@@ -240,9 +256,11 @@ name = "dsh-core"
 version = "0.1.0"
 dependencies = [
  "cordis",
+ "dsh-api",
  "dsh-llm",
  "dsh-session",
  "dsh-tools",
+ "dsh-types",
  "futures",
  "serde",
  "serde_json",
@@ -256,6 +274,8 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "cordis",
+ "dsh-api",
+ "dsh-types",
  "futures",
  "futures-util",
  "reqwest",
@@ -282,7 +302,9 @@ name = "dsh-session"
 version = "0.1.0"
 dependencies = [
  "cordis",
+ "dsh-api",
  "dsh-llm",
+ "dsh-types",
  "serde",
  "serde_json",
  "thiserror",
@@ -294,8 +316,22 @@ name = "dsh-tools"
 version = "0.1.0"
 dependencies = [
  "cordis",
+ "dsh-api",
  "dsh-llm",
+ "dsh-types",
  "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "dsh-types"
+version = "0.1.0"
+dependencies = [
+ "cordis",
+ "futures",
  "serde",
  "serde_json",
  "thiserror",

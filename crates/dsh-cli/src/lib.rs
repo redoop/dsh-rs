@@ -5,7 +5,7 @@ pub mod tui;
 use serde_json::Value;
 
 /// Render the final assistant text of a session (the last assistant message).
-pub fn last_assistant_text(session: &dsh_session::Session) -> String {
+pub fn last_assistant_text(session: &dyn dsh_api::services::SessionView) -> String {
     let messages = session.derive_messages();
     messages
         .iter()

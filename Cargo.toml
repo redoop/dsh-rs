@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/dsh-types",
+    "crates/dsh-api",
     "crates/dsh-llm",
     "crates/dsh-session",
     "crates/dsh-tools",

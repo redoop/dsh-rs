@@ -228,3 +228,38 @@ pub fn user_message(id: impl Into<String>, text: impl Into<String>) -> Message {
     }
 }
 
+
+
+impl dsh_api::services::SessionView for Session {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn header_cwd(&self) -> Option<String> {
+        self.header.cwd.clone()
+    }
+
+    fn events(&self) -> Vec<SessionEvent> {
+        self.events()
+    }
+
+    fn surface(&self) -> Vec<u64> {
+        self.surface()
+    }
+
+    fn derive_messages(&self) -> Vec<Message> {
+        self.derive_messages()
+    }
+
+    fn append(&self, data: SessionEventData) -> SessionEvent {
+        self.append(data)
+    }
+
+    fn request_header(&self) -> Option<dsh_types::EpochHeader> {
+        self.request_header()
+    }
+
+    fn open_turn(&self) -> Option<u64> {
+        self.open_turn()
+    }
+}

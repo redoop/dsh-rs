@@ -13,6 +13,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 libloading = "0.8"
+dsh-api = { path = "../dsh-api" }
+dsh-types = { path = "../dsh-types" }
 dsh-llm = { path = "../dsh-llm" }
 dsh-session = { path = "../dsh-session" }
 dsh-tools = { path = "../dsh-tools" }

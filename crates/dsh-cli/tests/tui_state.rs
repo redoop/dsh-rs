@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use cordis::Context;
 use dsh_cli::tui::{attach_listener, ChatItem, ChatState};
-use dsh_core::{AgentOptions, AgentRegistry};
-use dsh_llm::{ContentBlock, LlmRuntime, MessageSource, Role, StreamChunk};
+use dsh_api::services::AgentRegistryService;
+use dsh_core::AgentOptions;
+use dsh_llm::{ContentBlock, MessageSource, Role, StreamChunk};
 use dsh_session::{SessionEvent, SessionEventData, TurnEndReason, user_message};
 use serde_json::json;
 
@@ -163,7 +164,7 @@ async fn listener_folds_live_session_events() {
     }
 
     // Script the mock adapter: one tool call, then the final answer.
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -179,23 +180,23 @@ async fn listener_folds_live_session_events() {
         )
         .unwrap();
 
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
 
     // Attach the TUI projection before any work happens.
     let state = Arc::new(Mutex::new(ChatState {
-        session_id: Some(agent.id.clone()),
+        session_id: Some(agent.id().to_string()),
         ..Default::default()
     }));
-    attach_listener(&ctx, agent.id.clone(), state.clone()).await.unwrap();
+    attach_listener(&ctx, agent.id().to_string(), state.clone()).await.unwrap();
 
     agent.followup(dsh_core::agent::user_message_with_text("u-1", "run the tool"));
     agent.when_idle().await;
 
     let state = state.lock().unwrap();
-    assert_eq!(state.session_id.as_deref(), Some(agent.id.as_str()));
+    assert_eq!(state.session_id.as_deref(), Some(agent.id()));
     assert!(state.items.iter().any(|item| matches!(item, ChatItem::User { text } if text == "run the tool")));
     assert!(state
         .items

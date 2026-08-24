@@ -10,7 +10,5 @@ pub mod builtin;
 pub mod matcher;
 pub mod registry;
 
-pub use registry::{
-    TOOLS_SERVICE, ToolCallArgs, ToolDefinition, ToolExecutionResult, ToolGuard, ToolRegistry,
-    ToolRunContext, tools_plugin,
-};
+pub use dsh_types::{ToolCallArgs, ToolExecutionResult, ToolRunContext};
+pub use registry::{TOOLS_SERVICE, ToolDefinition, ToolGuard, ToolRegistry, tools_plugin};

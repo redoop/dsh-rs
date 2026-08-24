@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use cordis::Context;
 use dsh_cli::tui::{attach_listener, ChatItem, ChatState, ChatTui};
-use dsh_core::{AgentOptions, AgentRegistry};
+use dsh_api::services::AgentRegistryService;
+use dsh_core::AgentOptions;
 use dsh_llm::LlmRuntime;
 use serde_json::json;
 
@@ -158,7 +159,7 @@ fn chat_line_mode_uses_the_configured_defaults() {
 // ---------------------------------------------------------------------------
 
 /// Compose the minimal harness and return (ctx, agent).
-async fn harness() -> (Context, Arc<dsh_core::Agent>) {
+async fn harness() -> (Context, Arc<dyn dsh_api::services::AgentView>) {
     let ctx = Context::new();
     let llm = ctx.plugin(dsh_llm::llm_plugin(), Some(json!({})));
     let sessions = ctx.plugin(dsh_session::session_plugin(), None);
@@ -168,10 +169,11 @@ async fn harness() -> (Context, Arc<dsh_core::Agent>) {
     for handle in [&llm, &sessions, &tools, &prompt, &agent_loop] {
         handle.join().await.unwrap();
     }
-    let agents = ctx.require::<AgentRegistry>("agents").unwrap();
+    let agents = ctx.require::<AgentRegistryService>("agents").unwrap();
     let agent = agents
         .create(None, AgentOptions::mock("mock-1"), Some("/tmp".to_string()), None)
         .unwrap();
+    let agent: Arc<dyn dsh_api::services::AgentView> = agent;
     (ctx, agent)
 }
 
@@ -188,10 +190,10 @@ fn ctrl_c() -> ratatui::crossterm::event::KeyEvent {
 async fn tui_keys_type_submit_and_receive() {
     let (ctx, agent) = harness().await;
     let state = Arc::new(Mutex::new(ChatState {
-        session_id: Some(agent.id.clone()),
+        session_id: Some(agent.id().to_string()),
         ..Default::default()
     }));
-    attach_listener(&ctx, agent.id.clone(), state.clone()).await.unwrap();
+    attach_listener(&ctx, agent.id().to_string(), state.clone()).await.unwrap();
 
     let mut tui = ChatTui::default();
 
@@ -489,10 +491,10 @@ fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
 async fn tui_renders_conversation_and_input() {
     let (ctx, agent) = harness().await;
     let state = Arc::new(Mutex::new(ChatState {
-        session_id: Some(agent.id.clone()),
+        session_id: Some(agent.id().to_string()),
         ..Default::default()
     }));
-    attach_listener(&ctx, agent.id.clone(), state.clone()).await.unwrap();
+    attach_listener(&ctx, agent.id().to_string(), state.clone()).await.unwrap();
 
     // Run one short conversation so the projection has content.
     let mut tui = ChatTui::default();
@@ -512,7 +514,7 @@ async fn tui_renders_conversation_and_input() {
 
     // Title carries the session id.
     assert!(text.contains("dsh chat"), "title missing:\n{text}");
-    assert!(text.contains(&agent.id), "session id missing:\n{text}");
+    assert!(text.contains(agent.id()), "session id missing:\n{text}");
 
     // The conversation is rendered: user line, assistant echo line.
     assert!(text.contains("hello"), "conversation missing:\n{text}");
@@ -565,7 +567,7 @@ async fn tui_renders_tool_activity() {
     let (ctx, agent) = harness().await;
 
     // Script the mock: a bash tool call, then the final answer.
-    let runtime = ctx.require::<LlmRuntime>("llm").unwrap();
+    let runtime = ctx.require::<dsh_api::services::LlmService>("llm").unwrap();
     runtime.unregister_adapter(&["mock"]);
     runtime
         .register_adapter(
@@ -582,10 +584,10 @@ async fn tui_renders_tool_activity() {
         .unwrap();
 
     let state = Arc::new(Mutex::new(ChatState {
-        session_id: Some(agent.id.clone()),
+        session_id: Some(agent.id().to_string()),
         ..Default::default()
     }));
-    attach_listener(&ctx, agent.id.clone(), state.clone()).await.unwrap();
+    attach_listener(&ctx, agent.id().to_string(), state.clone()).await.unwrap();
 
     let mut tui = ChatTui::default();
     for c in "go".chars() {
