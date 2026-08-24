@@ -3,6 +3,8 @@
 [![crates.io](https://img.shields.io/crates/v/dsh-rs)](https://crates.io/crates/dsh-rs)
 [![docs.rs](https://img.shields.io/docsrs/dsh-rs)](https://docs.rs/dsh-rs)
 
+> [**中文版 README**](README.zh-CN.md) · [English](README.md)
+
 A standalone Rust port of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (`dsh`): an agent harness where **everything is a plugin**, built on
 [cordis-rust](https://github.com/redoop/cordis-rust) — the Rust port of the
@@ -79,32 +81,36 @@ session events; `agent/pre-step`, `agent/request`, `llm/stream`, and the three
 calling `next()`. The `session/event` firehose feeds persistence, and
 `session/flush` is the awaited durability checkpoint.
 
-## Workspace layout
+## Layout (single crate)
 
 ```text
+Cargo.toml       package dsh-rs 0.2.0 (lib `dsh_rs` + bin `dsh`)
+src/
+  types/         shared vocabulary — messages, streams, session events, agent options
+  api/           interface layer — service traits + wrappers, typed events, manifest
+  llm/           adapter seam — mock + OpenAI-compatible SSE adapter, block assembler,
+                 provider routing (feature "openai")
+  session/       append-only SessionEvent log, SessionStore, surface projection
+                 (derive_messages), JSONL persistence with crash-turn repair
+  tools/         ToolRegistry with the guarded pipeline (pre-execute -> guards ->
+                 execute -> post-execute); built-ins: bash, read_file, write_file,
+                 edit_file, glob, grep, todo_write
+  core/          SystemPromptService (sections/contexts/variables), agent registry +
+                 handle (followup/steer/inject/cancel/when_idle), the agent-loop driver
+  bundle/        base-bundle composition, JSON profile installer, manifest registry,
+                 dynamic-plugin host
+  cli/           runner helpers + terminal chat UI; the `dsh` binary is src/main.rs
+tests/           integration tests (chat flow, TUI state, dynamic plugins, ...)
 crates/
-  dsh-llm/      Message/ContentBlock/StreamChunk vocabulary, LlmAdapter seam,
-                LlmRuntime registry, BlockAssembler, mock adapter,
-                OpenAI-compatible SSE adapter (feature "openai")
-  dsh-session/  append-only SessionEvent log, Session, SessionStore,
-                surface projection (derive_messages), JSONL persistence
-                with crash-turn repair
-  dsh-tools/    ToolDefinition/ToolSchema, ToolRegistry with the guarded
-                pipeline (pre-execute -> guards -> execute -> post-execute),
-                built-ins: bash, read_file, write_file, edit_file, glob, grep
-  dsh-core/     SystemPromptService (sections/contexts/variables), Agent
-                registry + handle (followup/steer/inject/cancel/when_idle),
-                the agent-loop driver, todo_write tool
-  dsh-bundle/   base-bundle composition + JSON profile installer
-  dsh-cli/      the `dsh` binary: run / chat / transcript / providers
+  dsh-plugin-contract/   published C-ABI contract (0.2.0, crates.io)
+  dsh-plugin-hello/      example cdylib plugin (built standalone)
 ```
 
 ## Build & test
 
 ```sh
-source ./env.sh        # points CARGO_HOME at the workspace-local .cargo-home
-cargo build --workspace
-cargo test --workspace # 18 suites, all green
+cargo build     # single crate: build from the repository root
+cargo test      # 70 tests, all green
 ```
 
 ## Run
@@ -185,8 +191,8 @@ are omitted from wire messages.`
   `bash` → result → final answer.
 
 ```sh
-cargo test -p dsh-cli --test chat_flow   # 7 tests, no terminal required
-cargo test --workspace                   # 53 tests, all green
+cargo test --test chat_flow   # 16 tests, no terminal required
+cargo test                      # 70 tests, all green
 ```
 
 ## Dynamic plugins (independent compilation + runtime loading)
@@ -199,10 +205,10 @@ only computes (the same design as cordis-rust's `dynhost`).
 
 ```sh
 # 1. compile the example plugin as a standalone library
-cargo build -p dsh-plugin-hello
+(cd crates/dsh-plugin-hello && cargo build)
 
 # 2. load it into a running harness; it declares its tools and registers them
-./target/debug/dsh plugin load ./target/debug/libdsh_plugin_hello.dylib
+./target/debug/dsh plugin load crates/dsh-plugin-hello/target/debug/libdsh_plugin_hello.so
 #   loaded plugin: dsh-plugin-hello (state: Active)
 #   declared tools: dsh_hello
 #   tools now registered: bash, dsh_hello, edit_file, ...
