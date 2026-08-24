@@ -1,9 +1,23 @@
 # dsh-rs — everything is a plugin, in Rust
 
+[![crates.io](https://img.shields.io/crates/v/dsh-rs)](https://crates.io/crates/dsh-rs)
+[![docs.rs](https://img.shields.io/docsrs/dsh-rs)](https://docs.rs/dsh-rs)
+
 A standalone Rust port of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (`dsh`): an agent harness where **everything is a plugin**, built on
-[cordis-rs](https://github.com/redoop/cordis-rs) — the Rust port of the cordis
-kernel that powers the original DSH plugin system.
+[cordis-rust](https://github.com/redoop/cordis-rust) — the Rust port of the
+cordis kernel that powers the original DSH plugin system. Published on
+crates.io as a **single crate**:
+
+```toml
+[dependencies]
+dsh-rs = "0.2"
+```
+
+```console
+$ cargo install dsh-rs     # the dsh binary (provider config via ~/.dsh/config.json)
+$ dsh run --prompt "hi" --provider opencode
+```
 
 The mental model is identical to the reference implementation: model adapters,
 tools, session persistence, the system-prompt assembler, and the agent loop
@@ -181,7 +195,7 @@ A plugin can be **compiled independently as a cdylib** and **loaded at runtime**
 — the host dlopens it and adapts it to the cordis `Plugin` trait. The plugin
 speaks only a zero-dependency C-ABI contract (`dsh-plugin-contract`) and
 **never links cordis or tokio**: the host implements the framework, the plugin
-only computes (the same design as cordis-rs's `dynhost`).
+only computes (the same design as cordis-rust's `dynhost`).
 
 ```sh
 # 1. compile the example plugin as a standalone library
