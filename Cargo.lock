@@ -110,8 +110,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "cordis"
-version = "0.1.0"
+name = "cordis-rust"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48e2dcee419487b7ca4f2134840a5d888b8b63d9cd1ca91fc8e2c3642cfa7382"
 dependencies = [
  "serde",
  "serde_json",
@@ -202,7 +204,7 @@ dependencies = [
 name = "dsh-api"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-types",
  "futures",
  "serde",
@@ -215,7 +217,7 @@ dependencies = [
 name = "dsh-bundle"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-core",
  "dsh-llm",
@@ -235,7 +237,7 @@ dependencies = [
 name = "dsh-cli"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-bundle",
  "dsh-types",
@@ -252,7 +254,7 @@ dependencies = [
 name = "dsh-core"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-llm",
  "dsh-session",
@@ -270,7 +272,7 @@ name = "dsh-llm"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-types",
  "futures",
@@ -298,7 +300,7 @@ dependencies = [
 name = "dsh-session"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-llm",
  "dsh-types",
@@ -312,7 +314,7 @@ dependencies = [
 name = "dsh-tools"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "dsh-api",
  "dsh-llm",
  "dsh-types",
@@ -327,7 +329,7 @@ dependencies = [
 name = "dsh-types"
 version = "0.1.0"
 dependencies = [
- "cordis",
+ "cordis-rust",
  "futures",
  "serde",
  "serde_json",

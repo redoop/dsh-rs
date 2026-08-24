@@ -19,8 +19,8 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-# The kernel: a Rust port of the cordis plugin framework.
-cordis = { package = "cordis-rust", path = "../cordis-rs/crates/cordis" }
+# The kernel: a Rust port of the cordis plugin framework (crates.io release).
+cordis = { version = "0.2", package = "cordis-rust" }
 
 tokio = { version = "1.50", features = [
     "rt-multi-thread",
